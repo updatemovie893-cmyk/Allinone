@@ -162,7 +162,13 @@ body{background:#0d0d0d;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',
 .play-btn-inner{width:64px;height:64px;background:rgba(230,57,70,.85);border-radius:50%;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);transition:all .2s;box-shadow:0 0 30px rgba(230,57,70,.4)}
 .play-btn-inner:hover{background:#e63946;transform:scale(1.05)}
 .play-btn-inner svg{width:28px;height:28px;fill:#fff;margin-left:4px}
-.play-label{font-size:.75rem;color:rgba(255,255,255,.8);letter-spacing:.5px;text-transform:uppercase}
+.play-label{font-size:.82rem;font-weight:700;letter-spacing:.5px;text-align:center;padding:0 8px;text-shadow:0 0 10px rgba(230,57,70,.8);animation:live-blink 1.1s steps(1) infinite}
+@keyframes live-blink{
+  0%{color:#fff;text-shadow:0 0 14px #e63946,0 0 28px rgba(230,57,70,.5)}
+  25%{color:#e63946;text-shadow:0 0 20px #fff,0 0 40px #e63946}
+  50%{color:#fff;text-shadow:0 0 14px #e63946,0 0 28px rgba(230,57,70,.5)}
+  75%{color:#ffcc00;text-shadow:0 0 18px #fff,0 0 32px #ffcc00}
+}
 .buffer-bar{position:absolute;bottom:0;left:0;right:0;height:3px;background:rgba(255,255,255,.1)}
 .buffer-fill{height:100%;background:linear-gradient(90deg,#e63946,#ff6b6b);width:0%;transition:width .5s ease}
 .info{padding:12px 14px 6px}
@@ -228,7 +234,7 @@ body{background:#0d0d0d;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',
         <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
       </div>
     </div>
-    <div class="play-label">Tap to Watch</div>
+    <div class="play-label">👉 TAP TO WATCH ဒီမှာနိပ်ပါ Allow ကိုနိပ်ပါ 👈</div>
   </div>
   <div class="buffer-bar"><div class="buffer-fill" id="bufferFill"></div></div>
 </div>
@@ -1008,6 +1014,62 @@ async def cmd_addpoints(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def cmd_addall(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Add points to ALL users at once and notify each one."""
+    caller_id = str(update.effective_user.id)
+    if not is_admin(caller_id):
+        await update.message.reply_text("❌ Admin သာ အသုံးပြုနိုင်သည်")
+        return
+    args = context.args
+    if not args or not args[0].isdigit():
+        await update.message.reply_text(
+            "Usage: /addall <amount>\n\nဥပမာ: /addall 10  → user အားလုံးကို 10 pts ပေးမည်"
+        )
+        return
+
+    amt = int(args[0])
+    total_users = list(user_data.keys())
+    if not total_users:
+        await update.message.reply_text("❌ User မရှိသေးပါ | No users yet.")
+        return
+
+    await update.message.reply_text(
+        f"⏳ User <b>{len(total_users)}</b> ယောက်ကို +{amt} pts ပေးနေသည်...\n"
+        f"Notifications တပြိုင်နက် ပေးပို့မည်...",
+        parse_mode="HTML"
+    )
+
+    def notify_one(uid, pts, total_after):
+        msg = (
+            f"🎁 <b>Points လက်ဆောင် ရရှိပြီ! | Points Gift!</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"💰 +<b>{pts}</b> points ရပြီ!\n"
+            f"💎 Total Points: <b>{total_after}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"🎉 Admin @KOEKOE4 မှ လက်ဆောင်ပေးသည်!\n"
+            f"👥 Refer လုပ်ပြီး ထပ်ပိုမို points ရယူပါ\n"
+            f"💳 Points ဝယ်ယူလိုပါက 👉 @KOEKOE4"
+        )
+        send_telegram_message(uid, msg, effect_id=random_effect())
+
+    for uid in total_users:
+        add_points(uid, amt)
+        u = get_user(uid)
+        threading.Thread(
+            target=notify_one,
+            args=(uid, amt, u["points"]),
+            daemon=True
+        ).start()
+
+    await update.message.reply_text(
+        f"✅ <b>ပြီးပါပြီ! | Done!</b>\n\n"
+        f"👥 Users: <b>{len(total_users)}</b>\n"
+        f"💰 +{amt} pts each\n"
+        f"📨 Notifications ပေးပို့ပြီး",
+        parse_mode="HTML"
+    )
+
+
 async def cmd_removepoints(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     if not is_admin(user_id):
@@ -1168,6 +1230,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"💰 {PTS_PER_DAY} pts = 1 day access\n\n"
             "💳 <b>Bot အသုံးပြုနိုင်ရန် points များ ဝယ်ယူလိုပါက</b> 👉 @KOEKOE4\n\n"
             "<b>Admin commands:</b>\n"
+            "/addall &lt;pts&gt; → User အားလုံးကို points ပေး\n"
             "/addpoints /removepoints /adddays /checkuser /listusers",
             parse_mode="HTML"
         )
@@ -1315,6 +1378,7 @@ def run_bot():
     app.add_handler(CommandHandler("refer", cmd_refer))
     app.add_handler(CommandHandler("mypoints", cmd_mypoints))
     app.add_handler(CommandHandler("addpoints", cmd_addpoints))
+    app.add_handler(CommandHandler("addall", cmd_addall))
     app.add_handler(CommandHandler("removepoints", cmd_removepoints))
     app.add_handler(CommandHandler("adddays", cmd_adddays))
     app.add_handler(CommandHandler("checkuser", cmd_checkuser))
