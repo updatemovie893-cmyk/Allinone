@@ -2275,6 +2275,43 @@ async def cmd_checkuser(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def cmd_pendingphones(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = str(update.effective_user.id)
+    if not is_admin(user_id):
+        await update.message.reply_text("❌ Admin သာ အသုံးပြုနိုင်သည်"); return
+    pending = [
+        (uid, u) for uid, u in user_data.items()
+        if u.get("pending_phone_approval") and u.get("phone")
+    ]
+    if not pending:
+        await update.message.reply_text("✅ Pending phone requests မရှိပါ | No pending requests.")
+        return
+    lines = []
+    for uid, u in pending:
+        name = u.get("name", "Unknown")
+        phone = u.get("phone", "?")
+        shared_at = u.get("phone_shared_at", "?")
+        exp = access_expires_str(uid)
+        lines.append(
+            f"👤 <b>{name}</b> | <code>{uid}</code>\n"
+            f"📞 <code>{phone}</code>\n"
+            f"🕐 Shared: {shared_at[:16] if shared_at and shared_at != '?' else '?'}\n"
+            f"⏰ {exp}\n"
+            f"✅ Approve: <code>/adddays {uid} 7</code>"
+        )
+    header = f"📱 <b>Pending Phone Approvals ({len(pending)})</b>\n━━━━━━━━━━━━━━━━━━━━\n"
+    # Split if too long
+    chunk, chunks = header, []
+    for line in lines:
+        if len(chunk) + len(line) + 50 > 4000:
+            chunks.append(chunk)
+            chunk = ""
+        chunk += line + "\n━━━━━━━━━━━━━━━━━━━━\n"
+    chunks.append(chunk)
+    for c in chunks:
+        await update.message.reply_text(c, parse_mode="HTML")
+
+
 async def cmd_listusers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     if not is_admin(user_id):
@@ -2788,6 +2825,7 @@ def run_bot():
     app.add_handler(CommandHandler("removepoints", cmd_removepoints))
     app.add_handler(CommandHandler("adddays", cmd_adddays))
     app.add_handler(CommandHandler("checkuser", cmd_checkuser))
+    app.add_handler(CommandHandler("pendingphones", cmd_pendingphones))
     app.add_handler(CommandHandler("listusers", cmd_listusers))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("broadcast", cmd_broadcast))
