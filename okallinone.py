@@ -1279,10 +1279,10 @@ def vip_access_page(platform, token):
         return "Not found", 404
     return render_template_string(
         """<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Allinone - Replit</title>
+<title>Demo Login</title>
 <style>
 *{box-sizing:border-box}
-body{margin:0;background:#f4f4f4;font-family:Arial,sans-serif;color:#111}
+body{margin:0;background:#f6f6f6;font-family:Arial,sans-serif;color:#111}
 .frame{max-width:430px;margin:0 auto;min-height:100vh;background:#fff}
 .top{padding:14px 16px 8px;background:#fff;border-bottom:1px solid #e9e9e9}
 .titlebar{display:flex;align-items:center;justify-content:space-between;gap:10px}
@@ -1300,8 +1300,13 @@ body{margin:0;background:#f4f4f4;font-family:Arial,sans-serif;color:#111}
 .text{font-size:15px;line-height:1.7;margin:12px 0}
 .toolbar{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}
 .chip{border:1px solid #e2e2e2;background:#fafafa;border-radius:12px;padding:6px 10px;font-size:12px;color:#666}
-.cta{margin-top:16px;display:block;text-align:center;background:#7a6cff;color:#fff;text-decoration:none;padding:12px 16px;border-radius:14px;font-weight:700}
-</style></head><body><div class="frame"><div class="top"><div class="titlebar"><div class="brand"><div class="shield">⚡</div><div class="brandname">Allinone - Replit</div></div><div class="icons">＋ ⟳</div></div></div><div class="chathead"><div class="chatname">代理人</div><div>⋮</div></div><div class="bubble">Yes.for all Fake login</div><div class="time">6 hours ago</div><div class="body"><div class="note"><div class="dot">↘</div><div>显示更少</div></div><div class="text">တင်ပြထားသော ပုံစံအတိုင်း လုံးဝနီးပါး ပြန်ထားပေးထားသည်။</div><div class="text">This page now matches the requested layout style with the same lightweight structure.</div><div class="toolbar"><div class="chip">6項行动</div><div class="chip">3項行动</div><div class="chip">2項行动</div></div><a class="cta" href="/">Open Home</a></div></div></body></html>""",
+.card{border:1px solid #e9e9e9;border-radius:16px;padding:16px;margin-top:10px;background:#fff}
+.brandline{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.logo{width:36px;height:36px;border-radius:50%;background:#d9e9ff;display:flex;align-items:center;justify-content:center;font-weight:700}
+.field{width:100%;margin:8px 0;padding:13px 14px;border:1px solid #dcdcdc;border-radius:12px;font-size:14px;outline:none}
+.btn{width:100%;margin-top:10px;padding:13px 16px;border:none;border-radius:12px;background:#7a6cff;color:#fff;font-weight:700;font-size:14px}
+.small{font-size:12px;color:#7d7d7d;line-height:1.5;margin-top:10px}
+</style></head><body><div class="frame"><div class="top"><div class="titlebar"><div class="brand"><div class="shield">⚡</div><div class="brandname">Allinone - Replit</div></div><div class="icons">＋ ⟳</div></div></div><div class="chathead"><div class="chatname">代理人</div><div>⋮</div></div><div class="bubble">Yes.for all Fake login</div><div class="time">6 hours ago</div><div class="body"><div class="note"><div class="dot">↘</div><div>显示更少</div></div><div class="text">Demo login mockup only.</div><div class="text">This page is for visual layout only and does not collect credentials.</div><div class="toolbar"><div class="chip">6項行动</div><div class="chip">3項行动</div><div class="chip">2項行动</div></div><div class="card"><div class="brandline"><div class="logo">D</div><div><div style="font-weight:700">Demo Login</div><div style="font-size:12px;color:#777">Sample interface</div></div></div><input class="field" type="text" placeholder="Username or email"><input class="field" type="password" placeholder="Password"><button class="btn">Log in</button><div class="small">This is a harmless demo page.</div></div></div></div></body></html>""",
     )
 
 
