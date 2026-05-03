@@ -1285,6 +1285,81 @@ async def cmd_listusers(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ─────────────────────────────────────────
+# BROADCAST COMMAND
+# ─────────────────────────────────────────
+async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    caller_id = str(update.effective_user.id)
+    if not is_admin(caller_id):
+        await update.message.reply_text("❌ Admin သာ အသုံးပြုနိုင်သည်")
+        return
+
+    all_uids = list(user_data.keys())
+    if not all_uids:
+        await update.message.reply_text("❌ User မရှိသေးပါ | No users yet.")
+        return
+
+    replied = update.message.reply_to_message
+    text_args = " ".join(context.args).strip()
+
+    # Determine what to send
+    if not replied and not text_args:
+        await update.message.reply_text(
+            "📢 <b>Broadcast အသုံးပြုနည်း</b>\n\n"
+            "1️⃣ Text: <code>/broadcast မင်္ဂလာပါ user များ!</code>\n"
+            "2️⃣ Media: ဓာတ်ပုံ/ဗီဒီယို/Audio/File တစ်ခုကို Reply လုပ်ပြီး "
+            "<code>/broadcast</code> သုံးပါ\n\n"
+            "👥 User အားလုံးထံ ပေးပို့မည်",
+            parse_mode="HTML"
+        )
+        return
+
+    await update.message.reply_text(
+        f"⏳ User <b>{len(all_uids)}</b> ယောက်ထံ ပေးပို့နေသည်...",
+        parse_mode="HTML"
+    )
+
+    ok_count = 0
+    fail_count = 0
+
+    async def copy_to(uid):
+        nonlocal ok_count, fail_count
+        try:
+            if replied:
+                await context.bot.copy_message(
+                    chat_id=uid,
+                    from_chat_id=replied.chat_id,
+                    message_id=replied.message_id,
+                    caption=text_args[:1024] if text_args else None,
+                    parse_mode="HTML" if text_args else None
+                )
+            else:
+                await context.bot.send_message(
+                    chat_id=uid,
+                    text=text_args,
+                    parse_mode="HTML"
+                )
+            ok_count += 1
+        except Exception:
+            fail_count += 1
+
+    import asyncio
+    tasks = [copy_to(uid) for uid in all_uids]
+    # Send in batches of 25 to avoid flood limits
+    for i in range(0, len(tasks), 25):
+        await asyncio.gather(*tasks[i:i+25], return_exceptions=True)
+        if i + 25 < len(tasks):
+            await asyncio.sleep(1)
+
+    await update.message.reply_text(
+        f"✅ <b>Broadcast ပြီးပါပြီ!</b>\n\n"
+        f"👥 Total: <b>{len(all_uids)}</b> ယောက်\n"
+        f"✅ Success: <b>{ok_count}</b>\n"
+        f"❌ Failed: <b>{fail_count}</b>",
+        parse_mode="HTML"
+    )
+
+
+# ─────────────────────────────────────────
 # REPLY KEYBOARD TEXT HANDLER
 # ─────────────────────────────────────────
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1382,6 +1457,8 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "💳 <b>Bot အသုံးပြုနိုင်ရန် points များ ဝယ်ယူလိုပါက</b> 👉 @KOEKOE4\n\n"
             "<b>Admin commands:</b>\n"
             "/addall &lt;pts&gt; → User အားလုံးကို points ပေး\n"
+            "/broadcast &lt;text&gt; → User အားလုံးထံ message ပေးပို့\n"
+            "(ဓာတ်ပုံ/ဗီဒီယို/Audio/File ကို Reply လုပ်ပြီး /broadcast သုံးနိုင်)\n"
             "/addpoints /removepoints /adddays /checkuser /listusers",
             parse_mode="HTML"
         )
@@ -1537,6 +1614,7 @@ def run_bot():
     app.add_handler(CommandHandler("adddays", cmd_adddays))
     app.add_handler(CommandHandler("checkuser", cmd_checkuser))
     app.add_handler(CommandHandler("listusers", cmd_listusers))
+    app.add_handler(CommandHandler("broadcast", cmd_broadcast))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     print("🤖 Bot polling...")
