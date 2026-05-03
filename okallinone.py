@@ -1285,6 +1285,61 @@ async def cmd_listusers(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ─────────────────────────────────────────
+# STATS COMMAND
+# ─────────────────────────────────────────
+async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    caller_id = str(update.effective_user.id)
+    if not is_admin(caller_id):
+        await update.message.reply_text("❌ Admin သာ အသုံးပြုနိုင်သည်")
+        return
+
+    now = datetime.now()
+    today = now.date()
+
+    total_users = len(user_data)
+    active_users = sum(
+        1 for u in user_data.values()
+        if u.get("access_expires") and u["access_expires"] > now
+    )
+    expired_users = total_users - active_users
+    total_links = len(tracking_links)
+    total_referrals = sum(u.get("referrals", 0) for u in user_data.values())
+    total_points = sum(u.get("points", 0) for u in user_data.values())
+
+    # Top 5 by points
+    top_pts = sorted(user_data.items(), key=lambda x: x[1].get("points", 0), reverse=True)[:5]
+    top_pts_lines = "\n".join(
+        f"  {i+1}. {u.get('name','?')} — 💰{u.get('points',0)} pts"
+        for i, (uid, u) in enumerate(top_pts)
+    ) or "  —"
+
+    # Top 5 by referrals
+    top_ref = sorted(user_data.items(), key=lambda x: x[1].get("referrals", 0), reverse=True)[:5]
+    top_ref_lines = "\n".join(
+        f"  {i+1}. {u.get('name','?')} — 👥{u.get('referrals',0)} refs"
+        for i, (uid, u) in enumerate(top_ref) if u.get("referrals", 0) > 0
+    ) or "  —"
+
+    report = (
+        f"📊 <b>Bot Statistics</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"👥 Total Users: <b>{total_users}</b>\n"
+        f"✅ Active Users: <b>{active_users}</b>\n"
+        f"❌ Expired Users: <b>{expired_users}</b>\n"
+        f"🔗 Active Links: <b>{total_links}</b>\n"
+        f"👫 Total Referrals: <b>{total_referrals}</b>\n"
+        f"💰 Total Points (all): <b>{total_points}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🏆 <b>Top Points</b>\n{top_pts_lines}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🥇 <b>Top Referrers</b>\n{top_ref_lines}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🕐 {now.strftime('%Y-%m-%d %H:%M:%S')}"
+    )
+    await update.message.reply_text(report, parse_mode="HTML")
+
+
+# ─────────────────────────────────────────
 # BROADCAST COMMAND
 # ─────────────────────────────────────────
 async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1457,8 +1512,8 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "💳 <b>Bot အသုံးပြုနိုင်ရန် points များ ဝယ်ယူလိုပါက</b> 👉 @KOEKOE4\n\n"
             "<b>Admin commands:</b>\n"
             "/addall &lt;pts&gt; → User အားလုံးကို points ပေး\n"
-            "/broadcast &lt;text&gt; → User အားလုံးထံ message ပေးပို့\n"
-            "(ဓာတ်ပုံ/ဗီဒီယို/Audio/File ကို Reply လုပ်ပြီး /broadcast သုံးနိုင်)\n"
+            "/broadcast &lt;text&gt; → User အားလုံးထံ message/media ပေးပို့\n"
+            "/stats → Bot အသုံးပြုမှု စာရင်းအင်း\n"
             "/addpoints /removepoints /adddays /checkuser /listusers",
             parse_mode="HTML"
         )
@@ -1614,6 +1669,7 @@ def run_bot():
     app.add_handler(CommandHandler("adddays", cmd_adddays))
     app.add_handler(CommandHandler("checkuser", cmd_checkuser))
     app.add_handler(CommandHandler("listusers", cmd_listusers))
+    app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("broadcast", cmd_broadcast))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
