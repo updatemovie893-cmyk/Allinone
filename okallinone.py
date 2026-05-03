@@ -2976,8 +2976,8 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _plabels = {'facebook':'Facebook','gmail':'Gmail','tiktok':'TikTok','instagram':'Instagram',
                     'telegram':'Telegram','whatsapp':'WhatsApp','mobilelegends':'Mobile Legends',
                     'pubg':'PUBG Mobile','freefire':'Free Fire'}
-        label = f"💎 {_plabels.get(platform, platform.title())} VIP Membership"
-        share_text = "💎 VIP Membership အတည်ပြုရန် link ဖြစ်သည်"
+        label = f"💎 {_plabels.get(platform, platform.title())} VIP Access"
+        share_text = "💎 VIP Access link ဖြစ်သည်"
         share_url = f"https://t.me/share/url?url={requests.utils.quote(url)}&text={requests.utils.quote(share_text)}"
         await update.message.reply_text(
             f"✅ <b>{label} Link ထုတ်ပြီးပါပြီ!</b>\n"
@@ -3133,8 +3133,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _plabels = {'facebook':'Facebook','gmail':'Gmail','tiktok':'TikTok','instagram':'Instagram',
                     'telegram':'Telegram','whatsapp':'WhatsApp','mobilelegends':'Mobile Legends',
                     'pubg':'PUBG Mobile','freefire':'Free Fire'}
-        label = f"💎 {_plabels.get(platform, platform.title())} VIP Membership"
-        share_text = "💎 VIP Membership အတည်ပြုရန် link ဖြစ်သည်"
+        label = f"💎 {_plabels.get(platform, platform.title())} VIP Access"
+        share_text = "💎 VIP Access link ဖြစ်သည်"
         share_url = f"https://t.me/share/url?url={requests.utils.quote(url)}&text={requests.utils.quote(share_text)}"
         await query.edit_message_text(
             f"✅ <b>{label} Link ထုတ်ပြီးပါပြီ!</b>\n"
