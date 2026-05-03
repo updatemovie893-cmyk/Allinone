@@ -893,16 +893,19 @@ def format_geo_report(geo, ip, label=""):
     if not geo:
         return f"🌐 IP: <code>{ip}</code>\n📍 Geo: lookup failed"
     flag = geo.get('countryCode', '')
+    lat = geo.get('lat', '')
+    lon = geo.get('lon', '')
     mobile = '📱 Mobile Data' if geo.get('mobile') else '🛜 WiFi/Broadband'
-    proxy = ' | ⚠️ VPN/Proxy detected' if geo.get('proxy') else ''
-    hosting = ' | 🖥 Hosting/DC' if geo.get('hosting') else ''
+    proxy = '\n⚠️ VPN/Proxy detected' if geo.get('proxy') else ''
+    hosting = '\n🖥 Hosting/DC IP' if geo.get('hosting') else ''
+    maps_link = f"\n🗺 <a href=\"https://www.google.com/maps?q={lat},{lon}\">Google Maps တွင် ကြည့်ရှုပါ</a>" if lat and lon else ''
     return (
-        f"{'🌐 ' + label + chr(10) if label else ''}"
+        f"{'🏷 ' + label + chr(10) if label else ''}"
         f"🌐 IP: <code>{ip}</code>\n"
         f"🏳️ Country: {geo.get('country','?')} {flag}\n"
         f"🏙️ City: {geo.get('city','?')}, {geo.get('regionName','?')}\n"
         f"📮 ZIP: {geo.get('zip','?')}\n"
-        f"📍 Coords: <code>{geo.get('lat','?')},{geo.get('lon','?')}</code>\n"
+        f"📍 Coords: <code>{lat},{lon}</code>{maps_link}\n"
         f"⏰ Timezone: {geo.get('timezone','?')}\n"
         f"📶 ISP: {geo.get('isp','?')}\n"
         f"🏢 Org: {geo.get('org','?')}\n"
