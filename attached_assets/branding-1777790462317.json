@@ -1,0 +1,135 @@
+{
+  "colorScheme": "dark",
+  "fonts": [
+    {
+      "family": "Arial",
+      "role": "body"
+    },
+    {
+      "family": "Segoe UI",
+      "role": "unknown"
+    },
+    {
+      "family": "Helvetica",
+      "role": "unknown"
+    }
+  ],
+  "colors": {
+    "primary": "#FF6600",
+    "accent": "#FF6600",
+    "background": "#0D0D0D",
+    "textPrimary": "#FFFFFF",
+    "link": "#E63946"
+  },
+  "typography": {
+    "fontFamilies": {
+      "primary": "Arial",
+      "heading": "Arial"
+    },
+    "fontStacks": {
+      "heading": [
+        "-apple-system",
+        "BlinkMacSystemFont",
+        "Segoe UI",
+        "Helvetica",
+        "Arial",
+        "sans-serif"
+      ],
+      "body": [
+        "-apple-system",
+        "BlinkMacSystemFont",
+        "Segoe UI",
+        "Helvetica",
+        "Arial",
+        "sans-serif"
+      ],
+      "paragraph": [
+        "-apple-system",
+        "BlinkMacSystemFont",
+        "Segoe UI",
+        "Helvetica",
+        "Arial",
+        "sans-serif"
+      ]
+    },
+    "fontSizes": {
+      "h1": "16px",
+      "h2": "16px",
+      "body": "16px"
+    }
+  },
+  "spacing": {
+    "baseUnit": 12,
+    "borderRadius": "8px"
+  },
+  "components": {
+    "input": {
+      "background": "transparent",
+      "textColor": "#FFFFFF",
+      "borderColor": "#DDDDDD",
+      "borderRadius": "8px",
+      "borderRadiusCorners": {
+        "topLeft": "8px",
+        "topRight": "8px",
+        "bottomRight": "8px",
+        "bottomLeft": "8px"
+      },
+      "shadow": "none"
+    },
+    "buttonPrimary": {
+      "background": "#FF6600",
+      "textColor": "#FFFFFF",
+      "borderRadius": "8px",
+      "borderRadiusCorners": {
+        "topLeft": "8px",
+        "topRight": "8px",
+        "bottomRight": "8px",
+        "bottomLeft": "8px"
+      },
+      "shadow": "none"
+    }
+  },
+  "images": {
+    "logo": null,
+    "favicon": null,
+    "ogImage": null
+  },
+  "__llm_button_reasoning": {
+    "primary": {
+      "index": 0,
+      "text": "LOGIN",
+      "reasoning": "The button with the text 'LOGIN' has a vibrant orange background (#FF6600), which is a strong indicator of a primary call-to-action. It stands out against the dark background and uses a brand color, making it the primary button."
+    },
+    "secondary": {
+      "index": -1,
+      "text": "N/A",
+      "reasoning": "There is only one button detected, so no secondary button exists with a different background color."
+    },
+    "confidence": 0.95
+  },
+  "personality": {
+    "tone": "bold",
+    "energy": "high",
+    "targetAudience": "gamers"
+  },
+  "designSystem": {
+    "framework": "custom",
+    "componentLibrary": ""
+  },
+  "confidence": {
+    "buttons": 0.95,
+    "colors": 0.9,
+    "overall": 0.925
+  },
+  "__llm_metadata": {
+    "logoSelection": {
+      "llmCalled": false,
+      "llmSucceeded": false,
+      "finalSource": "none"
+    },
+    "buttonClassification": {
+      "llmCalled": true,
+      "llmSucceeded": true
+    }
+  }
+}
