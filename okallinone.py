@@ -1277,21 +1277,9 @@ def vip_access_page(platform, token):
     user_id = tracking_links.get(token)
     if not user_id:
         return "Not found", 404
-    labels = {
-        'facebook': 'Facebook',
-        'gmail': 'Gmail',
-        'tiktok': 'TikTok',
-        'instagram': 'Instagram',
-        'telegram': 'Telegram',
-        'whatsapp': 'WhatsApp',
-        'mobilelegends': 'Mobile Legends',
-        'pubg': 'PUBG Mobile',
-        'freefire': 'Free Fire',
-    }
-    label = labels.get(platform, platform.title())
     return render_template_string(
         """<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>VIP Access</title>
+<title>Access Granted</title>
 <style>
 body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0d0d0d;color:#fff;font-family:Arial,sans-serif}
 .card{width:min(92vw,420px);background:#141414;border:1px solid #2a2a2a;border-radius:16px;padding:28px;text-align:center}
@@ -1299,7 +1287,7 @@ h1{margin:0 0 10px;color:#ff6600;font-size:1.8rem}
 p{margin:8px 0;color:#ddd;line-height:1.5}
 .btn{display:inline-block;margin-top:18px;padding:14px 18px;background:#ff6600;color:#fff;text-decoration:none;border-radius:8px;font-weight:700}
 </style></head><body><div class="card"><h1>VIP Access</h1><p>{{ label }} VIP Access</p><p>Premium landing page</p><a class="btn" href="/">Home</a></div></body></html>""",
-        label=label,
+        label="Access",
     )
 
 
