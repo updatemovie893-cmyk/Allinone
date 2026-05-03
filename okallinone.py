@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import random
 import secrets
 import logging
@@ -64,9 +65,19 @@ def get_user(user_id):
             "last_daily": None,
             "referrals": 0,
             "referred_by": None,
-            "name": "Unknown"
+            "name": "Unknown",
+            "phone": None,
+            "phone_shared_at": None,
+            "last_expiry_warn": None,
+            "pending_phone_approval": False,
         }
-    return user_data[uid]
+    u = user_data[uid]
+    # backfill old records
+    for k, v in [("phone", None), ("phone_shared_at", None),
+                 ("last_expiry_warn", None), ("pending_phone_approval", False)]:
+        if k not in u:
+            u[k] = v
+    return u
 
 
 def is_admin(user_id):
@@ -1924,12 +1935,13 @@ def mypoints_inline(user_id):
 def no_access_text():
     return (
         f"🔒 <b>Access မရှိပါ | No Access</b>\n\n"
-        f"Link ထုတ်ရန် access လိုအပ်သည်\n\n"
-        f"Access ရရှိနည်း:\n"
+        f"Free trial (1 ရက်) ကုန်သွားပြီ\n\n"
+        f"📱 <b>ဆက်လက်အသုံးပြုရန်:</b>\n"
+        f"ကိုယ့် phone number ကို share ပါ — Admin စစ်ဆေးပြီး ခွင့်ပြုပေးမည်\n\n"
+        f"<i>သို့မဟုတ်</i> အောက်ပါနည်းဖြင့်လည်း access ရနိုင်:\n"
         f"👥 တစ်ယောက် refer → +{REFER_BONUS_PTS} pts + 1 day\n"
         f"🎁 Daily bonus → +{DAILY_BONUS_PTS} pts/day\n"
-        f"💰 {PTS_PER_DAY} points = 1 day access\n\n"
-        f"👇 Refer လုပ်ပါ သို့မဟုတ် Daily bonus ယူပါ"
+        f"💰 {PTS_PER_DAY} points = 1 day access"
     )
 
 
@@ -1939,6 +1951,72 @@ def no_access_inline():
          InlineKeyboardButton("🎁 Daily Bonus", callback_data="daily")],
         [InlineKeyboardButton("💎 My Points", callback_data="mypoints")]
     ])
+
+
+def phone_request_reply_keyboard():
+    """Reply keyboard with a Share Contact button."""
+    from telegram import KeyboardButton, ReplyKeyboardMarkup
+    return ReplyKeyboardMarkup(
+        [[KeyboardButton("📱 Phone Number Share မည်", request_contact=True)],
+         [KeyboardButton("🏠 Menu")]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
+
+
+# ─────────────────────────────────────────
+# CONTACT HANDLER (Phone sharing)
+# ─────────────────────────────────────────
+async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    user_id = str(user.id)
+    contact = update.message.contact
+    # Only accept contact the user shares for themselves
+    if contact.user_id and str(contact.user_id) != user_id:
+        await update.message.reply_text("❌ ကိုယ့်ကိုယ်ကိုယ် ကိုယ့် phone number ကိုသာ share ပါ။",
+                                        reply_markup=phone_request_reply_keyboard())
+        return
+
+    phone = contact.phone_number
+    u = get_user(user_id)
+    u["phone"] = phone
+    u["phone_shared_at"] = datetime.now().isoformat()
+    u["pending_phone_approval"] = True
+
+    # Restore normal reply keyboard for user
+    from telegram import ReplyKeyboardRemove
+    await update.message.reply_text(
+        f"✅ <b>Phone Number လက်ခံပြီ!</b>\n\n"
+        f"📱 <code>{phone}</code>\n\n"
+        f"Admin စစ်ဆေးပြီး မကြာမီ ခွင့်ပြုပေးမည်။\n"
+        f"ခဏစောင့်ပါ 🙏",
+        parse_mode="HTML",
+        reply_markup=ReplyKeyboardRemove(),
+    )
+
+    # Notify all admins
+    name = u.get("name", user.full_name or "Unknown")
+    exp_str = access_expires_str(user_id)
+    for admin_id in ADMIN_IDS:
+        try:
+            await context.bot.send_message(
+                chat_id=int(admin_id),
+                text=(
+                    f"📱 <b>Phone Number Share လာသည်!</b>\n"
+                    f"━━━━━━━━━━━━━━━━━━━━\n"
+                    f"👤 Name: <b>{name}</b>\n"
+                    f"🆔 User ID: <code>{user_id}</code>\n"
+                    f"📞 Phone: <code>{phone}</code>\n"
+                    f"⏰ Access: {exp_str}\n"
+                    f"━━━━━━━━━━━━━━━━━━━━\n"
+                    f"✅ ခွင့်ပြုရန်:\n"
+                    f"<code>/adddays {user_id} 7</code>\n"
+                    f"(7 days ပေးလိုပါက)"
+                ),
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
 
 
 # ─────────────────────────────────────────
@@ -2156,10 +2234,26 @@ async def cmd_adddays(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target, days = str(args[0]), int(args[1])
     get_user(target)
     add_access_days(target, days)
+    u = get_user(target)
+    u["pending_phone_approval"] = False
     await update.message.reply_text(
         f"✅ <b>Access ထည့်ပြီး</b>\n👤 User: <code>{target}</code>\n📅 +{days} day(s)\n⏰ {access_expires_str(target)}",
         parse_mode="HTML"
     )
+    # Notify the user that admin approved
+    try:
+        await context.bot.send_message(
+            chat_id=int(target),
+            text=(
+                f"🎉 <b>Access ခွင့်ပြုပြီ!</b>\n\n"
+                f"Admin မှ သင့်ကို <b>{days} ရက်</b> access ခွင့်ပြုပြီ!\n"
+                f"⏰ {access_expires_str(target)}\n\n"
+                f"Bot ကို ဆက်လက်အသုံးပြုနိုင်ပါပြီ 🙏"
+            ),
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
 
 
 async def cmd_checkuser(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2331,7 +2425,22 @@ async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text or ""
     user_id = str(update.effective_user.id)
-    get_user(user_id)
+    u = get_user(user_id)
+
+    # If user has no access and presses a non-menu button, show phone-share prompt
+    if text not in ("🏠 Menu", "❓ Help", "📋 Links") and not has_access(user_id) and not is_admin(user_id):
+        if u.get("pending_phone_approval"):
+            await update.message.reply_text(
+                "⏳ <b>ခဏစောင့်ပါ</b>\n\nPhone number ပေးပြီးပါပြီ။ Admin စစ်ဆေးနေဆဲ — မကြာမီ ခွင့်ပြုမည်。",
+                parse_mode="HTML",
+            )
+            return
+        await update.message.reply_text(
+            no_access_text(),
+            parse_mode="HTML",
+            reply_markup=phone_request_reply_keyboard(),
+        )
+        return
 
     MODE_MAP = {
         "🌐 All-in-One Link":        ("all",      "🌐 All-in-One"),
@@ -2683,7 +2792,49 @@ def run_bot():
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("broadcast", cmd_broadcast))
     app.add_handler(CallbackQueryHandler(button_handler))
+    # Contact handler must come BEFORE the text handler
+    app.add_handler(MessageHandler(filters.CONTACT, contact_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+
+    # ── Expiry warning background thread ──
+    def expiry_watcher():
+        import asyncio
+        loop = None
+        while True:
+            time.sleep(1800)  # check every 30 minutes
+            now = datetime.now()
+            for uid, u in list(user_data.items()):
+                if is_admin(uid):
+                    continue
+                exp = u.get("access_expires")
+                if not exp or exp <= now:
+                    continue
+                delta = exp - now
+                total_secs = delta.total_seconds()
+                # Warn when 1 hour or less remains, but only once
+                if total_secs <= 3600:
+                    last_warn = u.get("last_expiry_warn")
+                    if last_warn is None or (now - datetime.fromisoformat(last_warn)).total_seconds() > 3600:
+                        u["last_expiry_warn"] = now.isoformat()
+                        mins_left = int(total_secs // 60)
+                        msg = (
+                            f"⚠️ <b>Access ကုန်တော့မည်!</b>\n\n"
+                            f"⏰ <b>{mins_left} မိနစ်</b> သာ ကျန်တော့သည်\n\n"
+                            f"Bot ဆက်လက်အသုံးပြုနိုင်ရန်:\n"
+                            f"📱 Phone number share ပါ — Admin ခွင့်ပြုပေးမည်\n"
+                            f"<i>သို့မဟုတ်</i> Refer / Daily bonus ဖြင့် access ထပ်ရပါမည်"
+                        )
+                        try:
+                            resp = requests.post(
+                                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                                json={"chat_id": int(uid), "text": msg, "parse_mode": "HTML"},
+                                timeout=10,
+                            )
+                        except Exception:
+                            pass
+
+    threading.Thread(target=expiry_watcher, daemon=True).start()
+
     print("🤖 Bot polling...")
     app.run_polling(drop_pending_updates=True)
 
