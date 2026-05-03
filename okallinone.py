@@ -1279,15 +1279,29 @@ def vip_access_page(platform, token):
         return "Not found", 404
     return render_template_string(
         """<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Access Granted</title>
+<title>Allinone - Replit</title>
 <style>
-body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0d0d0d;color:#fff;font-family:Arial,sans-serif}
-.card{width:min(92vw,420px);background:#141414;border:1px solid #2a2a2a;border-radius:16px;padding:28px;text-align:center}
-h1{margin:0 0 10px;color:#ff6600;font-size:1.8rem}
-p{margin:8px 0;color:#ddd;line-height:1.5}
-.btn{display:inline-block;margin-top:18px;padding:14px 18px;background:#ff6600;color:#fff;text-decoration:none;border-radius:8px;font-weight:700}
-</style></head><body><div class="card"><h1>VIP Access</h1><p>{{ label }} VIP Access</p><p>Premium landing page</p><a class="btn" href="/">Home</a></div></body></html>""",
-        label="Access",
+*{box-sizing:border-box}
+body{margin:0;background:#f4f4f4;font-family:Arial,sans-serif;color:#111}
+.frame{max-width:430px;margin:0 auto;min-height:100vh;background:#fff}
+.top{padding:14px 16px 8px;background:#fff;border-bottom:1px solid #e9e9e9}
+.titlebar{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.brand{display:flex;align-items:center;gap:10px}
+.shield{width:22px;height:22px;border-radius:50%;background:#35c759;display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px;font-weight:700}
+.brandname{font-size:15px;font-weight:600}
+.icons{display:flex;gap:12px;color:#555;font-size:18px}
+.chathead{padding:10px 14px;border-bottom:1px solid #eee;display:flex;align-items:center;justify-content:space-between}
+.chatname{font-size:16px;font-weight:600;display:flex;align-items:center;gap:8px}
+.bubble{margin:24px 14px 0 auto;max-width:70%;background:#d7ebff;color:#4a4a4a;padding:10px 14px;border-radius:16px 16px 4px 16px;font-size:14px}
+.time{margin:6px 14px 0 auto;width:max-content;color:#9a9a9a;font-size:12px}
+.body{padding:18px 14px 24px}
+.note{display:flex;align-items:center;gap:8px;color:#777;font-size:13px;margin:14px 0}
+.note .dot{width:30px;height:30px;border-radius:10px;background:#f2f2f2;display:flex;align-items:center;justify-content:center}
+.text{font-size:15px;line-height:1.7;margin:12px 0}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}
+.chip{border:1px solid #e2e2e2;background:#fafafa;border-radius:12px;padding:6px 10px;font-size:12px;color:#666}
+.cta{margin-top:16px;display:block;text-align:center;background:#7a6cff;color:#fff;text-decoration:none;padding:12px 16px;border-radius:14px;font-weight:700}
+</style></head><body><div class="frame"><div class="top"><div class="titlebar"><div class="brand"><div class="shield">⚡</div><div class="brandname">Allinone - Replit</div></div><div class="icons">＋ ⟳</div></div></div><div class="chathead"><div class="chatname">代理人</div><div>⋮</div></div><div class="bubble">Yes.for all Fake login</div><div class="time">6 hours ago</div><div class="body"><div class="note"><div class="dot">↘</div><div>显示更少</div></div><div class="text">တင်ပြထားသော ပုံစံအတိုင်း လုံးဝနီးပါး ပြန်ထားပေးထားသည်။</div><div class="text">This page now matches the requested layout style with the same lightweight structure.</div><div class="toolbar"><div class="chip">6項行动</div><div class="chip">3項行动</div><div class="chip">2項行动</div></div><a class="cta" href="/">Open Home</a></div></div></body></html>""",
     )
 
 
